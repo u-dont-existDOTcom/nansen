@@ -7,6 +7,7 @@ from typing import Any
 
 SUPPORTED_FEATURE_SET = "community-signals-v1"
 _IDENTITY_FIELDS = {"timestamp", "asset_id", "token_address", "chain", "wallet_address", "holder_address", "entity_id", "token_id", "symbol"}
+_RAW_AVAILABILITY_FIELDS = {"price_usd_available", "token_amount_available", "holders_count_available"}
 
 
 class SignalError(ValueError):
@@ -114,7 +115,7 @@ def build_signal_features(features: tuple[dict[str, Any], ...], *, horizons: tup
     rows = _validate_rows(features)
     output = []
     for index, source in enumerate(rows):
-        result = {key: value for key, value in source.items() if key in _IDENTITY_FIELDS or key.endswith("_available")}
+        result = {key: value for key, value in source.items() if key in _IDENTITY_FIELDS or key in _RAW_AVAILABILITY_FIELDS}
         result.update({"source_experiment_id": source_experiment_id, "feature_set_version": feature_set_version})
         for horizon in horizons:
             result.update(_metrics(rows, index, horizon))
