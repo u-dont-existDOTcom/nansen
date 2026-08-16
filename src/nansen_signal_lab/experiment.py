@@ -375,7 +375,16 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
 
 
 def load_signal_manifest(manifest_path: str | Path) -> SignalBundle:
-    path = Path(manifest_path).resolve()
+    requested_path = Path(manifest_path)
+    if not requested_path.is_absolute():
+        requested_path = Path.cwd() / requested_path
+    experiments_root = requested_path.parent.parent.resolve()
+    path = requested_path.resolve()
+    if path.name != "manifest.json" or path.parent.parent != experiments_root:
+        raise ExperimentError(
+            "companion manifest must be a direct bundle under trusted experiments root "
+            f"{experiments_root}: requested {requested_path}, resolved {path}"
+        )
     try:
         manifest = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
@@ -433,7 +442,6 @@ def load_signal_manifest(manifest_path: str | Path) -> SignalBundle:
         )
     root = path.parent.resolve()
     source_path = (root / str(manifest["source_manifest"])).resolve()
-    experiments_root = root.parent.resolve()
     if (
         source_path.name != "manifest.json"
         or source_path.parent == root
