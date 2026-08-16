@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -81,23 +84,91 @@ def cmd_candidates(args):
     print(f"\nSaved: {path}")
 
 
-def write_flow_artifacts(*, body, payload, output_path, retrieved_at):
+def _flow_artifact_paths(output_path):
     response_path = Path(output_path)
-    response_path.parent.mkdir(parents=True, exist_ok=True)
-    response_path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n")
     request_path = response_path.with_name(f"{response_path.stem}.request.json")
+    return response_path, request_path
+
+
+def _write_sibling_temporary(path, content):
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(content)
+            output.flush()
+            os.fsync(output.fileno())
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return temporary
+
+
+def write_flow_artifacts(
+    *,
+    body,
+    payload,
+    output_path,
+    cache_hit,
+    response_retrieved_at,
+    artifact_written_at,
+    overwrite=True,
+):
+    response_path, request_path = _flow_artifact_paths(output_path)
+    response_path.parent.mkdir(parents=True, exist_ok=True)
+    if not overwrite and (response_path.exists() or request_path.exists()):
+        raise FileExistsError(
+            f"refusing to overwrite explicit flow output: {response_path} or {request_path}"
+        )
+    response_bytes = (json.dumps(body, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "endpoint": "tgm/flows",
         "payload": payload,
-        "retrieved_at": retrieved_at,
+        "cache_hit": bool(cache_hit),
+        "response_retrieved_at": response_retrieved_at,
+        "artifact_written_at": artifact_written_at,
         "response_file": response_path.name,
+        "response_sha256": hashlib.sha256(response_bytes).hexdigest(),
     }
-    request_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    request_bytes = (
+        json.dumps(metadata, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    response_temporary = None
+    request_temporary = None
+    try:
+        response_temporary = _write_sibling_temporary(response_path, response_bytes)
+        request_temporary = _write_sibling_temporary(request_path, request_bytes)
+        if not overwrite and (response_path.exists() or request_path.exists()):
+            raise FileExistsError(
+                f"refusing to overwrite explicit flow output: {response_path} or {request_path}"
+            )
+        response_temporary.replace(response_path)
+        response_temporary = None
+        request_temporary.replace(request_path)
+        request_temporary = None
+    finally:
+        if response_temporary is not None:
+            response_temporary.unlink(missing_ok=True)
+        if request_temporary is not None:
+            request_temporary.unlink(missing_ok=True)
     return response_path, request_path
 
 
 def cmd_flows(args):
+    safe = args.token[:12].replace("/", "_")
+    path = args.output if args.output is not None else Path("results") / f"flows-{args.chain}-{safe}.json"
+    response_path, request_path = _flow_artifact_paths(path)
+    if args.output is not None and not args.force_output and (
+        response_path.exists() or request_path.exists()
+    ):
+        raise FileExistsError(
+            f"refusing to overwrite explicit flow output: {response_path} or {request_path}"
+        )
     c = NansenClient()
     end = datetime.now(timezone.utc) if args.to is None else datetime.fromisoformat(args.to.replace("Z", "+00:00"))
     start = end - timedelta(days=args.days) if args.from_ is None else datetime.fromisoformat(args.from_.replace("Z", "+00:00"))
@@ -109,16 +180,18 @@ def cmd_flows(args):
         "pagination": {"page": 1, "per_page": args.limit},
         "order_by": [{"field": "date", "direction": "ASC"}],
     }
-    body = c.post("tgm/flows", payload, refresh=args.refresh)
-    retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    response = c.post_with_provenance("tgm/flows", payload, refresh=args.refresh)
+    body = response.body
+    artifact_written_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     rows = body.get("data", [])
-    safe = args.token[:12].replace("/", "_")
-    path = args.output if args.output is not None else Path("results") / f"flows-{args.chain}-{safe}.json"
     response_path, _ = write_flow_artifacts(
         body=body,
         payload=payload,
         output_path=path,
-        retrieved_at=retrieved_at,
+        cache_hit=response.cache_hit,
+        response_retrieved_at=response.response_retrieved_at,
+        artifact_written_at=artifact_written_at,
+        overwrite=args.output is None or args.force_output,
     )
     print(f"received {len(rows)} flow snapshots; saved {response_path}")
     for row in rows[:10]:
@@ -166,6 +239,7 @@ def build_parser():
     s.add_argument("--to")
     s.add_argument("--limit", type=int, default=100)
     s.add_argument("--output")
+    s.add_argument("--force-output", action="store_true")
     s.add_argument("--refresh", action="store_true")
     s.set_defaults(func=cmd_flows)
 

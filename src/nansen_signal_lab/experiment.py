@@ -66,6 +66,150 @@ def _experiment_context(manifest: Any) -> str:
     return "experiment_id=unknown"
 
 
+def _parse_aware_timestamp(value: Any, *, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise ExperimentError(f"flow row is missing a string {field}")
+    try:
+        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ExperimentError(f"invalid flow timestamp for {field}: {value}") from exc
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ExperimentError(f"flow timestamp for {field} must be timezone-aware: {value}")
+    return timestamp.astimezone(timezone.utc)
+
+
+def _require_nonnegative_int(record: dict[str, Any], field: str, *, evidence_id: str) -> int:
+    value = record.get(field)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ExperimentError(
+            f"evidence {evidence_id} {field} must be a non-negative integer"
+        )
+    return value
+
+
+def _validate_declared_timestamp(
+    value: Any,
+    *,
+    field: str,
+    evidence_id: str,
+    allow_none: bool = False,
+) -> datetime | None:
+    if value is None and allow_none:
+        return None
+    try:
+        return _parse_aware_timestamp(value, field=field)
+    except ExperimentError as exc:
+        raise ExperimentError(f"evidence {evidence_id} has invalid {field}: {exc}") from exc
+
+
+def _validate_flow_evidence(record: dict[str, Any], path: Path, *, evidence_id: str) -> None:
+    try:
+        body = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ExperimentError(f"cannot read flow evidence {evidence_id}: {exc}") from exc
+    if not isinstance(body, dict) or not isinstance(body.get("data"), list):
+        raise ExperimentError(f"flow response data must be a list (evidence_id={evidence_id})")
+
+    raw_rows = body["data"]
+    starts = []
+    complete_count = 0
+    for raw in raw_rows:
+        if not isinstance(raw, dict):
+            raise ExperimentError(f"flow row must be an object (evidence_id={evidence_id})")
+        starts.append(_parse_aware_timestamp(raw.get("date"), field="date"))
+        bucket_end = _parse_aware_timestamp(raw.get("bucket_end"), field="bucket_end")
+        if bucket_end <= starts[-1]:
+            raise ExperimentError(
+                f"flow bucket_end must be after bucket start (evidence_id={evidence_id})"
+            )
+        is_complete = raw.get("is_complete", True)
+        if not isinstance(is_complete, bool):
+            raise ExperimentError(
+                f"flow row is_complete must be boolean (evidence_id={evidence_id})"
+            )
+        complete_count += int(is_complete)
+
+    declared_row_count = _require_nonnegative_int(record, "row_count", evidence_id=evidence_id)
+    declared_complete_count = _require_nonnegative_int(
+        record, "complete_count", evidence_id=evidence_id
+    )
+    if declared_row_count != len(raw_rows):
+        raise ExperimentError(
+            f"evidence {evidence_id} row_count mismatch: "
+            f"declared {declared_row_count}, raw {len(raw_rows)}"
+        )
+    if declared_complete_count != complete_count:
+        raise ExperimentError(
+            f"evidence {evidence_id} complete_count mismatch: "
+            f"declared {declared_complete_count}, raw {complete_count}"
+        )
+
+    expected_from = min(starts) if starts else None
+    expected_to = max(starts) if starts else None
+    declared_from = _validate_declared_timestamp(
+        record.get("observed_from"),
+        field="observed_from",
+        evidence_id=evidence_id,
+        allow_none=True,
+    )
+    declared_to = _validate_declared_timestamp(
+        record.get("observed_to"),
+        field="observed_to",
+        evidence_id=evidence_id,
+        allow_none=True,
+    )
+    if declared_from != expected_from:
+        raise ExperimentError(
+            f"evidence {evidence_id} observed_from mismatch: "
+            f"declared {record.get('observed_from')}, raw {expected_from}"
+        )
+    if declared_to != expected_to:
+        raise ExperimentError(
+            f"evidence {evidence_id} observed_to mismatch: "
+            f"declared {record.get('observed_to')}, raw {expected_to}"
+        )
+
+
+def _validate_candidate_evidence(record: dict[str, Any], path: Path, *, evidence_id: str) -> None:
+    try:
+        with path.open(newline="", encoding="utf-8") as source:
+            reader = csv.DictReader(source)
+            rows = list(reader)
+    except (OSError, csv.Error, UnicodeError) as exc:
+        raise ExperimentError(f"cannot read candidate evidence {evidence_id}: {exc}") from exc
+    required_columns = {"chain", "token_address"}
+    if reader.fieldnames is None or not required_columns.issubset(reader.fieldnames):
+        raise ExperimentError(
+            f"candidate evidence {evidence_id} must contain chain and token_address columns"
+        )
+    declared_row_count = _require_nonnegative_int(record, "row_count", evidence_id=evidence_id)
+    declared_complete_count = _require_nonnegative_int(
+        record, "complete_count", evidence_id=evidence_id
+    )
+    if declared_row_count != len(rows):
+        raise ExperimentError(
+            f"evidence {evidence_id} row_count mismatch: "
+            f"declared {declared_row_count}, raw {len(rows)}"
+        )
+    if declared_complete_count != len(rows):
+        raise ExperimentError(
+            f"evidence {evidence_id} complete_count mismatch: "
+            f"declared {declared_complete_count}, raw {len(rows)}"
+        )
+    if record.get("observed_from") is not None or record.get("observed_to") is not None:
+        raise ExperimentError(
+            f"candidate evidence {evidence_id} observed bounds must be null"
+        )
+
+
+def _normalized_token_identity(chain: Any, address: Any) -> tuple[str, str]:
+    normalized_chain = str(chain)
+    normalized_address = str(address)
+    if normalized_address.lower().startswith("0x"):
+        normalized_address = normalized_address.lower()
+    return normalized_chain, normalized_address
+
+
 def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
     path = Path(manifest_path).resolve()
     try:
@@ -126,15 +270,37 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
             raise ExperimentError(
                 f"checksum mismatch for evidence {evidence_id}: expected {expected}, got {actual}"
             )
+        kind = str(record.get("kind", ""))
+        endpoint = str(record.get("endpoint", ""))
+        expected_endpoints = {
+            "tgm_flows": "tgm/flows",
+            "token_screener_candidates": "token-screener",
+        }
+        if kind not in expected_endpoints or endpoint != expected_endpoints[kind]:
+            raise ExperimentError(
+                f"invalid evidence kind/endpoint combination for {evidence_id}: {kind}/{endpoint}"
+            )
+        request = record.get("request")
+        if not isinstance(request, dict):
+            raise ExperimentError(f"evidence {evidence_id} request must be an object")
+        _validate_declared_timestamp(
+            record.get("retrieved_at"),
+            field="retrieved_at",
+            evidence_id=evidence_id,
+        )
+        if kind == "tgm_flows":
+            _validate_flow_evidence(record, evidence_path, evidence_id=evidence_id)
+        else:
+            _validate_candidate_evidence(record, evidence_path, evidence_id=evidence_id)
         evidence.append(EvidenceFile(
             id=evidence_id,
-            kind=str(record.get("kind", "")),
+            kind=kind,
             path=evidence_path,
             sha256=expected,
             metadata=dict(record),
         ))
 
-    evidence_ids = {item.id for item in evidence}
+    evidence_by_id = {item.id: item for item in evidence}
     seen_tokens = set()
     cohort = manifest["cohort"]
     if not isinstance(cohort, list):
@@ -142,16 +308,52 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
     for member in cohort:
         if not isinstance(member, dict):
             raise ExperimentError(f"cohort member must be an object ({context})")
-        identity = (str(member.get("chain", "")), str(member.get("address", "")).lower())
+        identity = _normalized_token_identity(member.get("chain", ""), member.get("address", ""))
         if not all(identity) or identity in seen_tokens:
             raise ExperimentError(
                 f"duplicate cohort token: {identity[0]}:{identity[1]} ({context})"
             )
         seen_tokens.add(identity)
         flow_id = str(member.get("flow_evidence_id", ""))
-        if flow_id not in evidence_ids:
+        if flow_id not in evidence_by_id:
             raise ExperimentError(
                 f"cohort token {identity[0]}:{identity[1]} has unknown flow evidence {flow_id} ({context})"
+            )
+        flow_evidence = evidence_by_id[flow_id]
+        if flow_evidence.kind != "tgm_flows":
+            raise ExperimentError(
+                f"cohort flow evidence {flow_id} is not tgm_flows ({context})"
+            )
+        request = flow_evidence.metadata["request"]
+        request_identity = request.get("payload") if isinstance(request.get("payload"), dict) else request
+        request_chain = request_identity.get("chain")
+        request_address = request_identity.get("token_address")
+        if request_chain is not None and str(request_chain) != identity[0]:
+            raise ExperimentError(
+                f"flow request identity mismatch for {flow_id}: "
+                f"chain {request_chain} != {identity[0]} ({context})"
+            )
+        if request_address is not None:
+            requested = _normalized_token_identity(identity[0], request_address)[1]
+            if requested != identity[1]:
+                raise ExperimentError(
+                    f"flow request identity mismatch for {flow_id}: "
+                    f"token_address {request_address} != {member.get('address')} ({context})"
+                )
+        selection = member.get("selection")
+        if not isinstance(selection, dict):
+            raise ExperimentError(
+                f"cohort token {identity[0]}:{identity[1]} selection must be an object ({context})"
+            )
+        candidate_id = str(selection.get("candidate_evidence_id", ""))
+        if candidate_id not in evidence_by_id:
+            raise ExperimentError(
+                f"cohort token {identity[0]}:{identity[1]} has unknown candidate evidence "
+                f"{candidate_id or 'unknown'} ({context})"
+            )
+        if evidence_by_id[candidate_id].kind != "token_screener_candidates":
+            raise ExperimentError(
+                f"candidate evidence {candidate_id} is not token_screener_candidates ({context})"
             )
 
     return Bundle(
@@ -171,35 +373,42 @@ def prepare_flow_rows(body: dict[str, Any]) -> PreparedRows:
     incomplete_count = 0
     invalid_metric_count = 0
     for raw in raw_rows:
-        value = raw.get("date")
-        if not isinstance(value, str):
-            raise ExperimentError("flow row is missing a string date")
-        try:
-            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-        except ValueError as exc:
-            raise ExperimentError(f"invalid flow timestamp: {value}") from exc
+        if not isinstance(raw, dict):
+            raise ExperimentError("flow row must be an object")
+        bucket_start = _parse_aware_timestamp(raw.get("date"), field="date")
+        timestamp = _parse_aware_timestamp(raw.get("bucket_end"), field="bucket_end")
+        if timestamp <= bucket_start:
+            raise ExperimentError(
+                f"flow bucket_end must be after bucket start: {raw.get('date')} -> {raw.get('bucket_end')}"
+            )
         if timestamp in seen:
-            raise ExperimentError(f"duplicate timestamp: {value}")
+            raise ExperimentError(f"duplicate timestamp: {raw.get('bucket_end')}")
         seen.add(timestamp)
         if not raw.get("is_complete", True):
             incomplete_count += 1
             continue
         try:
             price_usd = float(raw.get("price_usd"))
+            token_amount = float(raw.get("token_amount"))
         except (TypeError, ValueError):
             invalid_metric_count += 1
             continue
-        if not isfinite(price_usd) or price_usd == 0 or raw.get("token_amount") is None:
+        if (
+            not isfinite(price_usd)
+            or price_usd <= 0
+            or not isfinite(token_amount)
+            or token_amount < 0
+        ):
             invalid_metric_count += 1
             continue
         row = dict(raw)
         row["_timestamp"] = timestamp
         row["price_usd"] = price_usd
-        row["token_amount"] = float(row["token_amount"])
+        row["token_amount"] = token_amount
         rows.append(row)
     rows.sort(key=lambda row: row["_timestamp"])
     gaps = tuple(
-        (left["date"], right["date"])
+        (left["bucket_end"], right["bucket_end"])
         for left, right in zip(rows, rows[1:])
         if right["_timestamp"] - left["_timestamp"] != timedelta(hours=1)
     )
@@ -232,7 +441,9 @@ def build_hourly_features(
             "chain": cohort_member["chain"],
             "symbol": cohort_member["symbol"],
             "address": cohort_member["address"],
-            "timestamp": row["date"],
+            "timestamp": row["bucket_end"],
+            "source_bucket_start": row["date"],
+            "source_bucket_end": row["bucket_end"],
             "price_usd": row["price_usd"],
             "token_amount": row["token_amount"],
             "value_usd": row.get("value_usd"),
@@ -427,6 +638,7 @@ def csv_text(rows: tuple[dict[str, Any], ...], fieldnames: tuple[str, ...]) -> s
 def analysis_fieldnames(horizons: tuple[int, ...]) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     feature = (
         "experiment_id", "cohort_role", "chain", "symbol", "address", "timestamp",
+        "source_bucket_start", "source_bucket_end",
         "price_usd", "token_amount", "value_usd", "holders_count",
         "holdings_delta_tokens", "holdings_delta_pct", "holdings_delta_notional_usd",
         "selection_market_cap_usd", "selection_liquidity_usd", "selection_token_age_days",

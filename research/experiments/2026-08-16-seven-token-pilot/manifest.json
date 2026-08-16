@@ -334,8 +334,13 @@
     }
   ],
   "derivation": {
-    "hourly_features": "all complete hourly rows with valid non-zero price and holdings",
+    "hourly_features": "all complete hourly rows with finite positive price and finite non-negative holdings",
     "events": "every non-zero one-hour Smart-Money holdings change",
+    "availability_timestamp": "bucket_end",
+    "source_boundaries_preserved": [
+      "source_bucket_start",
+      "source_bucket_end"
+    ],
     "ordering": [
       "chain",
       "symbol",

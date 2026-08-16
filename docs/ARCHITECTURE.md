@@ -5,11 +5,11 @@ Test whether Smart-Money accumulation predicts forward returns, especially wheth
 
 ## Durable workflow
 1. **Authenticate cheaply** with one Token Screener call.
-2. **Cache raw API responses** by endpoint + canonical request hash. Never repay for an identical request unless `--refresh` is explicit.
+2. **Cache raw API responses** by endpoint + canonical request hash. Never repay for an identical request unless `--refresh` is explicit. Cache provenance preserves the original network retrieval time; legacy raw-only entries fall back explicitly to file mtime.
 3. **Discover candidates** with Token Screener using `only_smart_money=true`.
 4. **Inspect historical Smart-Money flows** for selected tokens using `tgm/flows` + `label=smart_money`.
 5. Before a serious backtest, validate field units and timestamp semantics from live responses.
-6. Build historical event cohorts without look-ahead/survivorship bias.
+6. Build historical event cohorts without look-ahead/survivorship bias. A completed hourly bucket becomes available at its timezone-aware `bucket_end`, never at its source `date` start boundary.
 7. Measure forward returns at 1h, 4h, 12h, 24h, 3d, 7d plus MFE/MAE and costs.
 8. Split discovery vs holdout periods before optimizing thresholds.
 

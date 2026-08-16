@@ -8,6 +8,8 @@
 
 **Tech Stack:** Python 3.12, standard-library `dataclasses`, `csv`, `datetime`, `hashlib`, `json`, and `pathlib`; existing `argparse`, pandas-free analysis code, and pytest 8.
 
+**Final-review correction:** The no-look-ahead invariant governs over the original sketches below: raw `date` is the source bucket start, while the feature/event timestamp and every horizon lookup use the timezone-aware `bucket_end` availability instant. Both raw boundaries are retained in derived rows. The corrected sketches in this plan reflect the implemented contract.
+
 ## Global Constraints
 
 - Never commit `.env`, API credentials, `.venv`, `data/cache/`, or unrelated `results/` scratch files.
@@ -16,6 +18,8 @@
 - Use percentage points for returns: `(end / start - 1) * 100`.
 - Exclude incomplete rows and rows missing price or holdings; count exclusions explicitly.
 - Reject duplicate timestamps; allow hourly gaps but never calculate a horizon across a gap.
+- Require timezone-aware `date` and `bucket_end`, require `bucket_end > date`, and never label finalized bucket contents before `bucket_end`.
+- Accept only finite positive prices and finite non-negative holdings; count and exclude invalid metric rows.
 - Forward returns, MFE, and MAE are labels only and never model features.
 - Missing horizons remain `None` in memory and empty in CSV; never zero-fill them.
 - Keep the seven-token pilot marked `discovery`; do not optimize thresholds or claim a fitted trading model.
@@ -27,7 +31,9 @@
 
 - Create `src/nansen_signal_lab/experiment.py`: manifest types, validation, time-series calculations, deterministic CSV generation, and check mode.
 - Modify `src/nansen_signal_lab/cli.py`: add `analyze`, optional flow output paths, and request metadata sidecars.
+- Modify `src/nansen_signal_lab/client.py`: retain body-returning `post()` and add cache-aware response provenance.
 - Create `tests/test_experiment.py`: unit and integration coverage for manifests, calculations, deterministic outputs, and the committed pilot.
+- Create `tests/test_client.py`: network, cache-hit, and legacy-cache provenance coverage.
 - Modify `tests/test_metrics.py`: add CLI-parser assertions only if parser behavior is not clearer in `test_experiment.py`.
 - Create `research/experiments/2026-08-16-seven-token-pilot/`: immutable raw evidence, manifest, derived CSVs, and reviewed report.
 - Create `docs/RESEARCH-LEDGER.md`: append-only experiment index and lessons.
@@ -252,7 +258,9 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
     evidence_ids = {item.id for item in evidence}
     seen_tokens = set()
     for member in manifest["cohort"]:
-        identity = (str(member.get("chain", "")), str(member.get("address", "")).lower())
+        address = str(member.get("address", ""))
+        normalized_address = address.lower() if address.lower().startswith("0x") else address
+        identity = (str(member.get("chain", "")), normalized_address)
         if not all(identity) or identity in seen_tokens:
             raise ExperimentError(f"duplicate cohort token: {identity[0]}:{identity[1]}")
         seen_tokens.add(identity)
@@ -268,7 +276,7 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
     )
 ```
 
-The validator must enforce schema version `1`, statuses `discovery` or `holdout`, strictly positive unique integer horizons, required top-level keys, unique evidence IDs, unique `(chain, address)` cohort identities, one valid `flow_evidence_id` per cohort member, evidence paths contained under the resolved bundle root, file existence, and exact SHA-256 matches. Build explicit error strings containing the experiment or evidence ID.
+The validator must enforce schema version `1`, statuses `discovery` or `holdout`, strictly positive unique integer horizons, required top-level keys, unique evidence IDs, EVM-case-insensitive but Solana-case-sensitive `(chain, address)` cohort identities, kind/endpoint compatibility, raw flow counts/completeness/observed bounds, consistent request/cohort identity when present, valid flow and candidate evidence references, evidence paths contained under the resolved bundle root, file existence, and exact SHA-256 matches. Build explicit error strings containing the experiment or evidence ID.
 
 - [ ] **Step 4: Run the focused tests and confirm they pass**
 
@@ -315,9 +323,11 @@ Use this deterministic hourly fixture:
 
 ```python
 def flow_row(hour, price, holdings, *, complete=True, holders=2):
+    start = datetime(2026, 8, 1, tzinfo=timezone.utc) + timedelta(hours=hour)
+    end = start + timedelta(hours=1)
     return {
-        "date": f"2026-08-01T{hour:02d}:00:00Z",
-        "bucket_end": f"2026-08-01T{hour + 1:02d}:00:00Z",
+        "date": start.isoformat().replace("+00:00", "Z"),
+        "bucket_end": end.isoformat().replace("+00:00", "Z"),
         "is_complete": complete,
         "price_usd": price,
         "token_amount": holdings,
@@ -358,10 +368,12 @@ def test_feature_and_event_windows_do_not_cross_gap_or_future():
     assert features[1]["trailing_price_return_1h_pct"] == pytest.approx(10.0)
     assert features[-1]["trailing_price_return_2h_pct"] is None
     events = build_event_windows(features, horizons=(1, 2))
-    event_at_hour_1 = next(row for row in events if row["timestamp"] == "2026-08-01T01:00:00Z")
-    assert event_at_hour_1["forward_price_return_1h_pct"] == pytest.approx(100 * (12 / 11 - 1))
-    assert event_at_hour_1["forward_price_return_2h_pct"] is None
-    assert event_at_hour_1["forward_2h_available"] is False
+    event_available_at_hour_2 = next(
+        row for row in events if row["timestamp"] == "2026-08-01T02:00:00Z"
+    )
+    assert event_available_at_hour_2["forward_price_return_1h_pct"] == pytest.approx(100 * (12 / 11 - 1))
+    assert event_available_at_hour_2["forward_price_return_2h_pct"] is None
+    assert event_available_at_hour_2["forward_2h_available"] is False
 
 
 def test_mfe_and_mae_use_only_prices_inside_mature_horizon():
@@ -425,30 +437,35 @@ def prepare_flow_rows(body: dict[str, Any]) -> PreparedRows:
     incomplete_count = 0
     invalid_metric_count = 0
     for raw in raw_rows:
-        value = raw.get("date")
-        if not isinstance(value, str):
-            raise ExperimentError("flow row is missing a string date")
-        try:
-            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-        except ValueError as exc:
-            raise ExperimentError(f"invalid flow timestamp: {value}") from exc
+        if not isinstance(raw, dict):
+            raise ExperimentError("flow row must be an object")
+        bucket_start = _parse_aware_timestamp(raw.get("date"), field="date")
+        timestamp = _parse_aware_timestamp(raw.get("bucket_end"), field="bucket_end")
+        if timestamp <= bucket_start:
+            raise ExperimentError("flow bucket_end must be after bucket start")
         if timestamp in seen:
-            raise ExperimentError(f"duplicate timestamp: {value}")
+            raise ExperimentError(f"duplicate timestamp: {raw.get('bucket_end')}")
         seen.add(timestamp)
         if not raw.get("is_complete", True):
             incomplete_count += 1
             continue
-        if raw.get("price_usd") in (None, 0) or raw.get("token_amount") is None:
+        try:
+            price_usd = float(raw.get("price_usd"))
+            token_amount = float(raw.get("token_amount"))
+        except (TypeError, ValueError):
+            invalid_metric_count += 1
+            continue
+        if not isfinite(price_usd) or price_usd <= 0 or not isfinite(token_amount) or token_amount < 0:
             invalid_metric_count += 1
             continue
         row = dict(raw)
         row["_timestamp"] = timestamp
-        row["price_usd"] = float(row["price_usd"])
-        row["token_amount"] = float(row["token_amount"])
+        row["price_usd"] = price_usd
+        row["token_amount"] = token_amount
         rows.append(row)
     rows.sort(key=lambda row: row["_timestamp"])
     gaps = tuple(
-        (left["date"], right["date"])
+        (left["bucket_end"], right["bucket_end"])
         for left, right in zip(rows, rows[1:])
         if right["_timestamp"] - left["_timestamp"] != timedelta(hours=1)
     )
@@ -481,7 +498,9 @@ def build_hourly_features(
             "chain": cohort_member["chain"],
             "symbol": cohort_member["symbol"],
             "address": cohort_member["address"],
-            "timestamp": row["date"],
+            "timestamp": row["bucket_end"],
+            "source_bucket_start": row["date"],
+            "source_bucket_end": row["bucket_end"],
             "price_usd": row["price_usd"],
             "token_amount": row["token_amount"],
             "value_usd": row.get("value_usd"),
@@ -549,9 +568,9 @@ def build_event_windows(
     return tuple(events)
 ```
 
-Parse timestamps as timezone-aware UTC datetimes and index by timestamp. Calculate a horizon only when the exact timestamp exists. An event is any non-zero one-hour holdings delta. MFE and MAE use prices at `t+1` through `t+h`, inclusive, only when the endpoint exists and every intervening hour is present.
+Parse both source boundaries as timezone-aware UTC datetimes, require increasing bounds, and index only by `bucket_end` availability. Calculate a horizon only when the exact availability timestamp exists. An event is any non-zero one-hour holdings delta. MFE and MAE use prices available at `t+1` through `t+h`, inclusive, only when the endpoint exists and every intervening hour is present.
 
-Hourly rows must include identity columns, source metrics, `holdings_delta_tokens`, `holdings_delta_pct`, `holdings_delta_notional_usd`, and trailing price/holdings columns for each configured horizon. Forward columns appear only in event rows.
+Hourly rows must include identity columns, `timestamp`, `source_bucket_start`, `source_bucket_end`, source metrics, `holdings_delta_tokens`, `holdings_delta_pct`, `holdings_delta_notional_usd`, and trailing price/holdings columns for each configured horizon. Forward columns appear only in event rows.
 
 - [ ] **Step 4: Implement token summaries and bundle-wide analysis**
 
@@ -774,6 +793,7 @@ def csv_text(rows: tuple[dict[str, Any], ...], fieldnames: tuple[str, ...]) -> s
 def analysis_fieldnames(horizons: tuple[int, ...]) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     feature = (
         "experiment_id", "cohort_role", "chain", "symbol", "address", "timestamp",
+        "source_bucket_start", "source_bucket_end",
         "price_usd", "token_amount", "value_usd", "holders_count",
         "holdings_delta_tokens", "holdings_delta_pct", "holdings_delta_notional_usd",
         "selection_market_cap_usd", "selection_liquidity_usd", "selection_token_age_days",
@@ -885,8 +905,8 @@ git commit -m "Add deterministic experiment analysis"
 - Modify: `tests/test_experiment.py`
 
 **Interfaces:**
-- Produces: `write_flow_artifacts(body, payload, output_path, retrieved_at)`, `flows --output PATH`, and a `.request.json` sidecar.
-- Consumes: the existing `NansenClient.post()` response and request payload.
+- Produces: provenance-aware `NansenClient.post_with_provenance()`, `write_flow_artifacts(...)`, `flows --output PATH [--force-output]`, and a `.request.json` sidecar.
+- Preserves: the existing body-returning `NansenClient.post()` interface and default ignored `results/` overwrite behavior.
 
 - [ ] **Step 1: Add failing tests for explicit outputs and secret-free metadata**
 
@@ -905,22 +925,28 @@ def test_write_flow_artifacts_preserves_payload_and_response(tmp_path):
         body={"data": []},
         payload=payload,
         output_path=output,
-        retrieved_at="2026-08-16T23:01:00Z",
+        cache_hit=True,
+        response_retrieved_at="2026-08-16T23:01:00Z",
+        artifact_written_at="2026-08-17T00:01:00Z",
     )
     assert json.loads(response_path.read_text()) == {"data": []}
     metadata = json.loads(request_path.read_text())
     assert metadata["endpoint"] == "tgm/flows"
     assert metadata["payload"] == payload
-    assert metadata["retrieved_at"] == "2026-08-16T23:01:00Z"
+    assert metadata["cache_hit"] is True
+    assert metadata["response_retrieved_at"] == "2026-08-16T23:01:00Z"
+    assert metadata["artifact_written_at"] == "2026-08-17T00:01:00Z"
+    assert metadata["response_sha256"] == hashlib.sha256(response_path.read_bytes()).hexdigest()
     assert "apikey" not in request_path.read_text().lower()
 
 
 def test_flows_parser_accepts_explicit_output():
     args = build_parser().parse_args([
         "flows", "--chain", "ethereum", "--token", "0xtoken",
-        "--days", "2", "--output", "research/raw/flows.json",
+        "--days", "2", "--output", "research/raw/flows.json", "--force-output",
     ])
     assert args.output == "research/raw/flows.json"
+    assert args.force_output is True
 ```
 
 - [ ] **Step 2: Run the focused tests and confirm they fail**
@@ -936,23 +962,28 @@ Expected: missing writer and parser option failures.
 Add:
 
 ```python
-def write_flow_artifacts(*, body, payload, output_path, retrieved_at):
-    response_path = Path(output_path)
-    response_path.parent.mkdir(parents=True, exist_ok=True)
-    response_path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n")
-    request_path = response_path.with_name(f"{response_path.stem}.request.json")
+def write_flow_artifacts(
+    *, body, payload, output_path, cache_hit,
+    response_retrieved_at, artifact_written_at, overwrite=True,
+):
+    response_path, request_path = _flow_artifact_paths(output_path)
+    response_bytes = (json.dumps(body, indent=2, ensure_ascii=False) + "\n").encode()
     metadata = {
-        "schema_version": 1,
+        "schema_version": 2,
         "endpoint": "tgm/flows",
         "payload": payload,
-        "retrieved_at": retrieved_at,
+        "cache_hit": cache_hit,
+        "response_retrieved_at": response_retrieved_at,
+        "artifact_written_at": artifact_written_at,
         "response_file": response_path.name,
+        "response_sha256": hashlib.sha256(response_bytes).hexdigest(),
     }
-    request_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    # Write and fsync sibling temporary files, then replace both destinations.
+    # If overwrite is false, refuse when either destination already exists.
     return response_path, request_path
 ```
 
-Register `--output`. When omitted, preserve the current `results/flows-{chain}-{token-prefix}.json` response path. Always write the sidecar. Capture `retrieved_at` after `post()` returns. Never include headers, environment values, or the API key.
+Register `--output` and `--force-output`. When `--output` is omitted, preserve the current `results/flows-{chain}-{token-prefix}.json` response path and overwrite behavior. For an explicit path, refuse before the API call if either response or sidecar exists unless `--force-output` is supplied. Always write both through flushed and fsynced sibling temporary files before replacement. Cache metadata preserves the original network retrieval time; legacy raw-only caches use file mtime rather than a newly invented retrieval. Never include headers, environment values, or the API key.
 
 - [ ] **Step 4: Run focused tests and the full suite**
 
@@ -1057,7 +1088,7 @@ flows-solana-A13oRB9FFaiU.json  7986503809d72c19b9cb5ab234ea416370edb3c3b9d35e26
 flows-solana-Ai66LHZG9MCz.json  acf08cb859a347ed48346c154c7a9ace17d6301d3789237f106848079013c8f5
 ```
 
-All seven flow files have 96 rows from `2026-08-12T10:00:00Z` through `2026-08-16T09:00:00Z`, with 95 complete rows. Record each file's retrieval time from the design specification evidence audit and record the original invocation using `--days 4 --limit 100`. Mark the exact original request boundaries as unavailable because the old CLI did not persist them.
+All seven flow files have 96 source rows whose `date` starts run from `2026-08-12T10:00:00Z` through `2026-08-16T09:00:00Z`, with 95 complete rows. Their complete derived availability window is `2026-08-12T11:00:00Z` through `2026-08-16T09:00:00Z`. Record each file's retrieval time from the design specification evidence audit and record the original invocation using `--days 4 --limit 100`. Mark the exact original request boundaries as unavailable because the old CLI did not persist them.
 
 The cohort must contain CDXR, AI-HEDGE-FUND, CHEAT.SH, MONGO, PRISMA, TOAD, and CATE with the addresses and chain assignments from the approved design context. Copy selection-time market cap, liquidity, age, netflow, and normalized price change from the candidate CSV by matching address.
 

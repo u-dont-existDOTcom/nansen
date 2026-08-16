@@ -38,6 +38,7 @@ The bootstrap:
 ```
 
 Identical requests are cached under `data/cache/`. Use `--refresh` only when you deliberately want another paid/current API call.
+Flow responses written to the default ignored `results/` scratch path retain the historical overwrite behavior. An explicit `flows --output PATH` is treated as durable evidence and refuses to replace either the response or its `.request.json` sidecar unless `--force-output` is also supplied. New sidecars distinguish cache hits, original response retrieval time, artifact write time, and the exact response SHA-256. Legacy raw-only cache entries use their file modification time as the retrieval-time fallback instead of claiming a fresh network response.
 
 ## Research architecture
 
