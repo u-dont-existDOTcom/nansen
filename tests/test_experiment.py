@@ -80,5 +80,74 @@ def test_manifest_rejects_duplicate_token_identity(tmp_path):
     data = json.loads(manifest.read_text())
     data["cohort"].append(dict(data["cohort"][0]))
     manifest.write_text(json.dumps(data))
-    with pytest.raises(ExperimentError, match="duplicate cohort token"):
+    with pytest.raises(ExperimentError, match="duplicate cohort token.*experiment_id=fixture"):
+        load_and_validate_manifest(manifest)
+
+
+def test_manifest_rejects_non_object_top_level(tmp_path):
+    manifest = write_bundle(tmp_path)
+    manifest.write_text("[]")
+    with pytest.raises(ExperimentError, match="manifest must be an object.*experiment_id=unknown"):
+        load_and_validate_manifest(manifest)
+
+
+def test_manifest_rejects_non_list_evidence(tmp_path):
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["evidence"] = {}
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ExperimentError, match="evidence must be a list.*experiment_id=fixture"):
+        load_and_validate_manifest(manifest)
+
+
+def test_manifest_rejects_non_object_evidence_record(tmp_path):
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["evidence"] = [[]]
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ExperimentError, match="evidence record must be an object.*evidence_id=unknown"):
+        load_and_validate_manifest(manifest)
+
+
+def test_manifest_rejects_non_list_cohort(tmp_path):
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["cohort"] = {}
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ExperimentError, match="cohort must be a list.*experiment_id=fixture"):
+        load_and_validate_manifest(manifest)
+
+
+def test_manifest_rejects_non_object_cohort_member(tmp_path):
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["cohort"] = [[]]
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ExperimentError, match="cohort member must be an object.*experiment_id=fixture"):
+        load_and_validate_manifest(manifest)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("schema_version", 2, "unsupported schema version"),
+        ("status", "invalid", "invalid experiment status"),
+        ("horizons_hours", [1, 1], "horizons_hours must contain unique positive integers"),
+    ],
+)
+def test_manifest_validation_errors_include_experiment_id(tmp_path, field, value, message):
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data[field] = value
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ExperimentError, match=f"{message}.*experiment_id=fixture"):
+        load_and_validate_manifest(manifest)
+
+
+def test_manifest_missing_key_error_includes_experiment_id(tmp_path):
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    del data["title"]
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ExperimentError, match="manifest missing keys: title.*experiment_id=fixture"):
         load_and_validate_manifest(manifest)
