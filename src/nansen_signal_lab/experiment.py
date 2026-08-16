@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -181,12 +182,17 @@ def prepare_flow_rows(body: dict[str, Any]) -> PreparedRows:
         if not raw.get("is_complete", True):
             incomplete_count += 1
             continue
-        if raw.get("price_usd") in (None, 0) or raw.get("token_amount") is None:
+        try:
+            price_usd = float(raw.get("price_usd"))
+        except (TypeError, ValueError):
+            invalid_metric_count += 1
+            continue
+        if not isfinite(price_usd) or price_usd == 0 or raw.get("token_amount") is None:
             invalid_metric_count += 1
             continue
         row = dict(raw)
         row["_timestamp"] = timestamp
-        row["price_usd"] = float(row["price_usd"])
+        row["price_usd"] = price_usd
         row["token_amount"] = float(row["token_amount"])
         rows.append(row)
     rows.sort(key=lambda row: row["_timestamp"])
@@ -312,7 +318,11 @@ def build_token_summary(
         datetime.fromisoformat(row["timestamp"].replace("Z", "+00:00")).astimezone(timezone.utc): row
         for row in features
     }
-    old_24h = by_time.get(last_time - timedelta(hours=24))
+    history_24h = [
+        by_time.get(last_time - timedelta(hours=offset))
+        for offset in range(1, 25)
+    ]
+    old_24h = history_24h[-1] if all(row is not None for row in history_24h) else None
 
     def change(start: float | None, end: float | None) -> float | None:
         if start in (None, 0) or end is None:
