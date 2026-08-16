@@ -1,7 +1,9 @@
+import csv
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
+from io import StringIO
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -406,3 +408,90 @@ def build_analysis(bundle: Bundle) -> AnalysisTables:
         event_windows=tuple(sorted(all_events, key=key)),
         token_summary=tuple(sorted(all_summaries, key=key)),
     )
+
+
+def csv_text(rows: tuple[dict[str, Any], ...], fieldnames: tuple[str, ...]) -> str:
+    output = StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=fieldnames,
+        lineterminator="\n",
+        extrasaction="raise",
+    )
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: "" if row.get(key) is None else row.get(key) for key in fieldnames})
+    return output.getvalue()
+
+
+def analysis_fieldnames(horizons: tuple[int, ...]) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    feature = (
+        "experiment_id", "cohort_role", "chain", "symbol", "address", "timestamp",
+        "price_usd", "token_amount", "value_usd", "holders_count",
+        "holdings_delta_tokens", "holdings_delta_pct", "holdings_delta_notional_usd",
+        "selection_market_cap_usd", "selection_liquidity_usd", "selection_token_age_days",
+        "selection_netflow_usd", "selection_flow_mcap_ratio",
+    ) + tuple(
+        name
+        for horizon in horizons
+        for name in (
+            f"trailing_price_return_{horizon}h_pct",
+            f"trailing_holdings_change_{horizon}h_pct",
+        )
+    )
+    event = feature + ("event_type",) + tuple(
+        name
+        for horizon in horizons
+        for name in (
+            f"forward_{horizon}h_available",
+            f"forward_price_return_{horizon}h_pct",
+            f"mfe_{horizon}h_pct",
+            f"mae_{horizon}h_pct",
+        )
+    )
+    summary = (
+        "experiment_id", "cohort_role", "chain", "symbol", "address",
+        "observed_from", "observed_to", "valid_row_count", "raw_row_count",
+        "incomplete_row_count", "invalid_metric_row_count", "gap_count",
+        "price_return_24h_pct", "holdings_change_24h_pct", "price_return_all_pct",
+        "holdings_change_all_pct", "wallets_change_all", "gross_accumulation_tokens",
+        "gross_distribution_tokens", "accumulation_event_count", "distribution_event_count",
+    ) + tuple(
+        name
+        for horizon in horizons
+        for name in (
+            f"accumulation_weighted_trailing_{horizon}h_pct",
+            f"accumulation_weighted_forward_{horizon}h_pct",
+        )
+    )
+    return feature, event, summary
+
+
+def render_analysis_csvs(bundle: Bundle, tables: AnalysisTables) -> dict[str, str]:
+    horizons = tuple(sorted(int(value) for value in bundle.manifest["horizons_hours"]))
+    feature_fields, event_fields, summary_fields = analysis_fieldnames(horizons)
+    return {
+        "hourly-features.csv": csv_text(tables.hourly_features, feature_fields),
+        "event-windows.csv": csv_text(tables.event_windows, event_fields),
+        "token-summary.csv": csv_text(tables.token_summary, summary_fields),
+    }
+
+
+def analyze_manifest(manifest_path: str | Path, *, check: bool = False) -> tuple[Path, ...]:
+    bundle = load_and_validate_manifest(manifest_path)
+    tables = build_analysis(bundle)
+    rendered = render_analysis_csvs(bundle, tables)
+    derived = bundle.root / "derived"
+    paths = tuple(derived / name for name in rendered)
+    if check:
+        for path in paths:
+            expected = rendered[path.name].encode("utf-8")
+            if not path.is_file() or path.read_bytes() != expected:
+                raise ExperimentError(f"derived output differs: {path}")
+        return paths
+    derived.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(rendered[path.name], encoding="utf-8", newline="")
+        temporary.replace(path)
+    return paths

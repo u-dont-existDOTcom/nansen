@@ -8,6 +8,7 @@ import pytest
 
 from src.nansen_signal_lab.experiment import (
     ExperimentError,
+    analyze_manifest,
     build_analysis,
     build_event_windows,
     build_hourly_features,
@@ -15,6 +16,7 @@ from src.nansen_signal_lab.experiment import (
     load_and_validate_manifest,
     prepare_flow_rows,
 )
+from src.nansen_signal_lab.cli import build_parser
 
 
 def flow_row(hour, price, holdings, *, complete=True, holders=2):
@@ -229,6 +231,61 @@ def write_bundle(tmp_path: Path) -> Path:
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest))
     return path
+
+
+def write_bundle_with_four_hour_flow_fixture(tmp_path: Path) -> Path:
+    """Create four complete consecutive observations with hand-known returns."""
+    manifest = write_bundle(tmp_path)
+    body = {"data": [
+        flow_row(0, 10, 100),
+        flow_row(1, 11, 110),
+        flow_row(2, 12, 120),
+        flow_row(3, 13, 130),
+    ]}
+    raw_path = tmp_path / "raw" / "flows.json"
+    raw_path.write_text(json.dumps(body))
+    data = json.loads(manifest.read_text())
+    data["horizons_hours"] = [1, 2]
+    data["evidence"][0].update({
+        "sha256": hashlib.sha256(raw_path.read_bytes()).hexdigest(),
+        "observed_from": "2026-08-01T00:00:00Z",
+        "observed_to": "2026-08-01T03:00:00Z",
+        "row_count": 4,
+        "complete_count": 4,
+    })
+    manifest.write_text(json.dumps(data))
+    return manifest
+
+
+def test_analyze_writes_deterministic_csvs(tmp_path):
+    """Fails if regeneration changes committed CSV bytes or omits a table."""
+    manifest = write_bundle_with_four_hour_flow_fixture(tmp_path)
+
+    paths = analyze_manifest(manifest)
+    first = {path.name: path.read_bytes() for path in paths}
+    analyze_manifest(manifest)
+    second = {path.name: path.read_bytes() for path in paths}
+
+    assert first == second
+    assert set(first) == {"hourly-features.csv", "event-windows.csv", "token-summary.csv"}
+
+
+def test_analyze_check_rejects_derived_drift(tmp_path):
+    """Fails if --check accepts bytes that do not match the real analysis output."""
+    manifest = write_bundle_with_four_hour_flow_fixture(tmp_path)
+    paths = analyze_manifest(manifest)
+    paths[0].write_text("mutated\n")
+
+    with pytest.raises(ExperimentError, match="derived output differs"):
+        analyze_manifest(manifest, check=True)
+
+
+def test_analyze_parser_accepts_manifest_and_check():
+    """Fails if the CLI no longer accepts its reproducibility-check arguments."""
+    args = build_parser().parse_args(["analyze", "--manifest", "bundle/manifest.json", "--check"])
+
+    assert args.manifest == "bundle/manifest.json"
+    assert args.check is True
 
 
 def test_manifest_accepts_matching_evidence(tmp_path):
