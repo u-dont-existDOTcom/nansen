@@ -1,0 +1,360 @@
+{
+  "schema_version": 1,
+  "experiment_id": "2026-08-16-seven-token-pilot",
+  "title": "Seven-token Smart-Money accumulation pilot",
+  "status": "discovery",
+  "created_at": "2026-08-16T09:40:29.518407Z",
+  "hypothesis": "Smart-Money accumulation before a large price move may have different forward-return behavior from accumulation after momentum is already visible.",
+  "horizons_hours": [
+    1,
+    4,
+    12,
+    24
+  ],
+  "source": {
+    "provider": "Nansen",
+    "attribution": "Powered by Nansen API",
+    "provider_url": "https://nansen.ai/",
+    "redistribution_guide_url": "https://docs.nansen.ai/guides/redistribution-guide",
+    "endpoints": [
+      "token-screener",
+      "tgm/flows"
+    ]
+  },
+  "cohort": [
+    {
+      "chain": "ethereum",
+      "symbol": "CDXR",
+      "address": "0x40aaf75454036bed56f3266ccf18f6b7befd6aca",
+      "role": "early",
+      "flow_evidence_id": "flows-cdxr",
+      "selection": {
+        "market_cap_usd": 33729028.7040088,
+        "liquidity_usd": 2836325.670113879,
+        "token_age_days": 72.0,
+        "netflow_usd": 412131.6194107813,
+        "price_change_pct": -0.058208610090323736,
+        "flow_mcap_ratio": 0.012218899720696615,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    },
+    {
+      "chain": "base",
+      "symbol": "AI-HEDGE-FUND",
+      "address": "0xadf4d5b9d7e54e3e85b667ed613a285bce36b821",
+      "role": "early",
+      "flow_evidence_id": "flows-ai-hedge-fund",
+      "selection": {
+        "market_cap_usd": 7883698.08513757,
+        "liquidity_usd": 123110.38460183535,
+        "token_age_days": 158.0,
+        "netflow_usd": 8786.022479232748,
+        "price_change_pct": -27.43615194573869,
+        "flow_mcap_ratio": 0.0011144544583456652,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    },
+    {
+      "chain": "base",
+      "symbol": "CHEAT.SH",
+      "address": "0xadfd54cb2997d3a0077f0aafbd8ebbf9ac10b99c",
+      "role": "momentum",
+      "flow_evidence_id": "flows-cheat-sh",
+      "selection": {
+        "market_cap_usd": 9325420.00667191,
+        "liquidity_usd": 129599.00751895338,
+        "token_age_days": 158.0,
+        "netflow_usd": 10599.232077900018,
+        "price_change_pct": 28.445330238953563,
+        "flow_mcap_ratio": 0.0011365956782983238,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    },
+    {
+      "chain": "base",
+      "symbol": "MONGO",
+      "address": "0xadf9afd4fa1dfef7a06a7cd56140af14a4dc2860",
+      "role": "early",
+      "flow_evidence_id": "flows-mongo",
+      "selection": {
+        "market_cap_usd": 7131696.7342978,
+        "liquidity_usd": 118608.79099916715,
+        "token_age_days": 157.0,
+        "netflow_usd": 2128.1615316372827,
+        "price_change_pct": 1.8774772172034426,
+        "flow_mcap_ratio": 0.0002984088655091733,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    },
+    {
+      "chain": "base",
+      "symbol": "PRISMA",
+      "address": "0xadf0d31463cb2f2a88dbf0bcb22964a7d5960c25",
+      "role": "momentum",
+      "flow_evidence_id": "flows-prisma",
+      "selection": {
+        "market_cap_usd": 6769478.19334206,
+        "liquidity_usd": 114353.72388017198,
+        "token_age_days": 156.0,
+        "netflow_usd": 2400.1383293564063,
+        "price_change_pct": 119.22344161400918,
+        "flow_mcap_ratio": 0.00035455293019733756,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    },
+    {
+      "chain": "solana",
+      "symbol": "TOAD",
+      "address": "A13oRB9FFaiUjfi6LdCg6p9ka1u8SfGkUFs4SKvPpump",
+      "role": "early",
+      "flow_evidence_id": "flows-toad",
+      "selection": {
+        "market_cap_usd": 6801824.64329852,
+        "liquidity_usd": 351701.194409072,
+        "token_age_days": 8.0,
+        "netflow_usd": 15840.557576656207,
+        "price_change_pct": -14.44676128063035,
+        "flow_mcap_ratio": 0.002328868856133049,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    },
+    {
+      "chain": "solana",
+      "symbol": "CATE",
+      "address": "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
+      "role": "momentum",
+      "flow_evidence_id": "flows-cate",
+      "selection": {
+        "market_cap_usd": 17616893.9507943,
+        "liquidity_usd": 588226.6092511985,
+        "token_age_days": 21.0,
+        "netflow_usd": 43477.21428720788,
+        "price_change_pct": 17.167813400842327,
+        "flow_mcap_ratio": 0.002467927343415018,
+        "candidate_evidence_id": "candidates-20260816T094029Z"
+      }
+    }
+  ],
+  "evidence": [
+    {
+      "id": "candidates-20260816T094029Z",
+      "kind": "token_screener_candidates",
+      "path": "raw/candidates-20260816T094029Z.csv",
+      "sha256": "4ed384e23a9156017e358c524ae8c837f40c251ec993d819e88fe801bb8fba43",
+      "endpoint": "token-screener",
+      "request": {
+        "reconstructed_cli_invocation": "./nansen-lab candidates",
+        "chains": [
+          "solana",
+          "ethereum",
+          "base",
+          "bnb",
+          "arbitrum"
+        ],
+        "timeframe": "24h",
+        "limit": 50,
+        "minimum_market_cap_usd": 1000000,
+        "minimum_token_age_days": 3,
+        "request_payload_persisted": false
+      },
+      "retrieved_at": "2026-08-16T09:40:29.518407Z",
+      "source_file_modification_time": "2026-08-16T09:40:29.518407Z",
+      "observed_from": null,
+      "observed_to": null,
+      "row_count": 50,
+      "complete_count": 50
+    },
+    {
+      "id": "flows-cdxr",
+      "kind": "tgm_flows",
+      "path": "raw/flows-ethereum-0x40aaf75454.json",
+      "sha256": "b13039c4a9afd6f66ab621b9c0164892f8e625847e75c6bf71f68e2d358f4a3f",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain ethereum --token 0x40aaf75454036bed56f3266ccf18f6b7befd6aca --days 4 --limit 100",
+        "chain": "ethereum",
+        "token_address": "0x40aaf75454036bed56f3266ccf18f6b7befd6aca",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:50:17.223729Z",
+      "source_file_modification_time": "2026-08-16T09:50:17.223729Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    },
+    {
+      "id": "flows-ai-hedge-fund",
+      "kind": "tgm_flows",
+      "path": "raw/flows-base-0xadf4d5b9d7.json",
+      "sha256": "680fe1da9c1a317a975ad4a5b8ba347b0d391a7a14abd9740eae620bcd4c2785",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain base --token 0xadf4d5b9d7e54e3e85b667ed613a285bce36b821 --days 4 --limit 100",
+        "chain": "base",
+        "token_address": "0xadf4d5b9d7e54e3e85b667ed613a285bce36b821",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:50:40.740211Z",
+      "source_file_modification_time": "2026-08-16T09:50:40.740211Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    },
+    {
+      "id": "flows-cheat-sh",
+      "kind": "tgm_flows",
+      "path": "raw/flows-base-0xadfd54cb29.json",
+      "sha256": "3a50c97dfce1c4ce85b84a8bd65950ef09a3c409481347e158d95c1dcf603581",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain base --token 0xadfd54cb2997d3a0077f0aafbd8ebbf9ac10b99c --days 4 --limit 100",
+        "chain": "base",
+        "token_address": "0xadfd54cb2997d3a0077f0aafbd8ebbf9ac10b99c",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:50:45.056251Z",
+      "source_file_modification_time": "2026-08-16T09:50:45.056251Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    },
+    {
+      "id": "flows-mongo",
+      "kind": "tgm_flows",
+      "path": "raw/flows-base-0xadf9afd4fa.json",
+      "sha256": "4f2b87e2df8e7909f10cd584023bdc71e1aebf3ac7223ca25bd6902de71fe243",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain base --token 0xadf9afd4fa1dfef7a06a7cd56140af14a4dc2860 --days 4 --limit 100",
+        "chain": "base",
+        "token_address": "0xadf9afd4fa1dfef7a06a7cd56140af14a4dc2860",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:50:56.999177Z",
+      "source_file_modification_time": "2026-08-16T09:50:56.999177Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    },
+    {
+      "id": "flows-prisma",
+      "kind": "tgm_flows",
+      "path": "raw/flows-base-0xadf0d31463.json",
+      "sha256": "469c9195c9d262dee393ae68ab5b78bbc9ffcd649da405303fcaf90e62f8b463",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain base --token 0xadf0d31463cb2f2a88dbf0bcb22964a7d5960c25 --days 4 --limit 100",
+        "chain": "base",
+        "token_address": "0xadf0d31463cb2f2a88dbf0bcb22964a7d5960c25",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:51:01.071203Z",
+      "source_file_modification_time": "2026-08-16T09:51:01.071203Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    },
+    {
+      "id": "flows-toad",
+      "kind": "tgm_flows",
+      "path": "raw/flows-solana-A13oRB9FFaiU.json",
+      "sha256": "7986503809d72c19b9cb5ab234ea416370edb3c3b9d35e26644bd6e43046472a",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain solana --token A13oRB9FFaiUjfi6LdCg6p9ka1u8SfGkUFs4SKvPpump --days 4 --limit 100",
+        "chain": "solana",
+        "token_address": "A13oRB9FFaiUjfi6LdCg6p9ka1u8SfGkUFs4SKvPpump",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:51:05.951207Z",
+      "source_file_modification_time": "2026-08-16T09:51:05.951207Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    },
+    {
+      "id": "flows-cate",
+      "kind": "tgm_flows",
+      "path": "raw/flows-solana-Ai66LHZG9MCz.json",
+      "sha256": "acf08cb859a347ed48346c154c7a9ace17d6301d3789237f106848079013c8f5",
+      "endpoint": "tgm/flows",
+      "request": {
+        "original_cli_invocation": "./nansen-lab flows --chain solana --token Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump --days 4 --limit 100",
+        "chain": "solana",
+        "token_address": "Ai66LHZG9MCzg1WKdawwqduVAXpNDUuV8M3uyq5ppump",
+        "label": "smart_money",
+        "days": 4,
+        "limit": 100,
+        "exact_from": null,
+        "exact_to": null,
+        "boundary_provenance": "unavailable: the legacy CLI did not persist exact request boundaries"
+      },
+      "retrieved_at": "2026-08-16T09:51:10.838743Z",
+      "source_file_modification_time": "2026-08-16T09:51:10.838743Z",
+      "observed_from": "2026-08-12T10:00:00Z",
+      "observed_to": "2026-08-16T09:00:00Z",
+      "row_count": 96,
+      "complete_count": 95
+    }
+  ],
+  "derivation": {
+    "hourly_features": "all complete hourly rows with valid non-zero price and holdings",
+    "events": "every non-zero one-hour Smart-Money holdings change",
+    "ordering": [
+      "chain",
+      "symbol",
+      "timestamp"
+    ],
+    "forward_labels_are_features": false
+  },
+  "provenance_gaps": [
+    "The legacy collection CLI did not persist exact from/to request timestamps for these relative four-day flow requests.",
+    "The candidate CSV is a transformed Token Screener export; the legacy CLI did not persist its exact request payload alongside the file."
+  ],
+  "exclusions": [
+    {
+      "artifact": "the earlier candidates CSV in scratch results",
+      "reason": "byte-identical duplicate of candidates-20260816T094029Z.csv; not committed twice"
+    },
+    {
+      "artifact": "flows-solana-Ai66LHZG9MCz.pre-pilot.json",
+      "reason": "shorter pre-pilot CATE response superseded by the validated four-day response and lacking sufficient request provenance"
+    }
+  ]
+}

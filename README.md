@@ -44,3 +44,15 @@ Identical requests are cached under `data/cache/`. Use `--refresh` only when you
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The initial experiment compares early Smart-Money accumulation with momentum accumulation and eventually an eligible-token control cohort, while explicitly avoiding look-ahead and survivorship bias.
 
 This repository is the canonical durable checkpoint for the workflow.
+
+## Committed research evidence
+
+The first public evidence bundle is the [`2026-08-16 seven-token pilot`](research/experiments/2026-08-16-seven-token-pilot/REPORT.md). Reproduce its deterministic analysis with:
+
+```bash
+./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json --check
+```
+
+`results/` is ignored scratch space for exploratory outputs. Evidence becomes durable only after it is copied byte-for-byte into `research/experiments/`, checksummed in a manifest, documented, and committed. The append-only [`research ledger`](docs/RESEARCH-LEDGER.md) and [`evidence graph`](docs/RESEARCH-GRAPH.md) preserve the experiment's claims, limitations, and follow-up state.
+
+[Powered by Nansen API](https://nansen.ai/). Public Token Screener and `tgm/flows` evidence is included under Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

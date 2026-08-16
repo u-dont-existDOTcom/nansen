@@ -469,3 +469,26 @@ def test_manifest_missing_key_error_includes_experiment_id(tmp_path):
     manifest.write_text(json.dumps(data))
     with pytest.raises(ExperimentError, match="manifest missing keys: title.*experiment_id=fixture"):
         load_and_validate_manifest(manifest)
+
+
+def test_committed_pilot_summary_matches_observed_results():
+    manifest = Path("research/experiments/2026-08-16-seven-token-pilot/manifest.json")
+    tables = build_analysis(load_and_validate_manifest(manifest))
+    actual = {
+        row["symbol"]: (
+            round(row["price_return_24h_pct"], 2),
+            round(row["holdings_change_24h_pct"], 2),
+            round(row["price_return_all_pct"], 2),
+            round(row["holdings_change_all_pct"], 2),
+        )
+        for row in tables.token_summary
+    }
+    assert actual == {
+        "CDXR": (0.04, 45.55, 0.72, 52.50),
+        "AI-HEDGE-FUND": (-27.01, 0.70, -20.14, 0.14),
+        "CHEAT.SH": (39.80, 1.28, 171.94, 1.14),
+        "MONGO": (-20.48, 0.20, -64.11, 1.31),
+        "PRISMA": (168.92, 0.86, 264.03, -0.15),
+        "TOAD": (-6.98, 5.35, -46.95, 32.58),
+        "CATE": (27.23, 3.71, 9.48, 11.28),
+    }
