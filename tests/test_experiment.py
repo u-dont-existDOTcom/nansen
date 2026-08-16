@@ -13,6 +13,7 @@ from src.nansen_signal_lab.experiment import (
     build_event_windows,
     build_hourly_features,
     build_token_summary,
+    csv_text,
     load_and_validate_manifest,
     prepare_flow_rows,
 )
@@ -268,6 +269,12 @@ def test_analyze_writes_deterministic_csvs(tmp_path):
 
     assert first == second
     assert set(first) == {"hourly-features.csv", "event-windows.csv", "token-summary.csv"}
+
+
+def test_csv_text_rejects_unknown_output_fields():
+    """Fails if an analysis row silently loses an unexpected output field."""
+    with pytest.raises(ValueError, match="dict contains fields not in fieldnames"):
+        csv_text(({"known": "ok", "unexpected": "lost"},), ("known",))
 
 
 def test_analyze_check_rejects_derived_drift(tmp_path):
