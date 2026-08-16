@@ -989,43 +989,7 @@ git commit -m "Record flow request provenance"
 - Consumes: the analyzer from Task 3 and immutable scratch evidence listed below.
 - Produces: the first complete public experiment bundle and durable research memory.
 
-- [ ] **Step 1: Copy the canonical raw evidence byte-for-byte**
-
-Create the bundle directories, then copy only these files from `results/`:
-
-```text
-candidates-20260816T094029Z.csv
-flows-ethereum-0x40aaf75454.json
-flows-base-0xadf4d5b9d7.json
-flows-base-0xadfd54cb29.json
-flows-base-0xadf9afd4fa.json
-flows-base-0xadf0d31463.json
-flows-solana-A13oRB9FFaiU.json
-flows-solana-Ai66LHZG9MCz.json
-```
-
-Do not copy `.env`, cache files, the byte-identical earlier candidates CSV, or `flows-solana-Ai66LHZG9MCz.pre-pilot.json`.
-
-- [ ] **Step 2: Write the manifest with exact checksums and provenance**
-
-Use these immutable checksums:
-
-```text
-candidates-20260816T094029Z.csv  4ed384e23a9156017e358c524ae8c837f40c251ec993d819e88fe801bb8fba43
-flows-ethereum-0x40aaf75454.json  b13039c4a9afd6f66ab621b9c0164892f8e625847e75c6bf71f68e2d358f4a3f
-flows-base-0xadf4d5b9d7.json  680fe1da9c1a317a975ad4a5b8ba347b0d391a7a14abd9740eae620bcd4c2785
-flows-base-0xadfd54cb29.json  3a50c97dfce1c4ce85b84a8bd65950ef09a3c409481347e158d95c1dcf603581
-flows-base-0xadf9afd4fa.json  4f2b87e2df8e7909f10cd584023bdc71e1aebf3ac7223ca25bd6902de71fe243
-flows-base-0xadf0d31463.json  469c9195c9d262dee393ae68ab5b78bbc9ffcd649da405303fcaf90e62f8b463
-flows-solana-A13oRB9FFaiU.json  7986503809d72c19b9cb5ab234ea416370edb3c3b9d35e26644bd6e43046472a
-flows-solana-Ai66LHZG9MCz.json  acf08cb859a347ed48346c154c7a9ace17d6301d3789237f106848079013c8f5
-```
-
-All seven flow files have 96 rows from `2026-08-12T10:00:00Z` through `2026-08-16T09:00:00Z`, with 95 complete rows. Record each file's retrieval time from the design specification evidence audit and record the original invocation using `--days 4 --limit 100`. Mark the exact original request boundaries as unavailable because the old CLI did not persist them.
-
-The cohort must contain CDXR, AI-HEDGE-FUND, CHEAT.SH, MONGO, PRISMA, TOAD, and CATE with the addresses and chain assignments from the approved design context. Copy selection-time market cap, liquidity, age, netflow, and normalized price change from the candidate CSV by matching address.
-
-- [ ] **Step 3: Add an integration test that freezes the seven-line summary**
+- [ ] **Step 1: Add an integration test that freezes the seven-line summary**
 
 ```python
 def test_committed_pilot_summary_matches_observed_results():
@@ -1048,26 +1012,72 @@ def test_committed_pilot_summary_matches_observed_results():
         "PRISMA": (168.92, 0.86, 264.03, -0.15),
         "TOAD": (-6.98, 5.35, -46.95, 32.58),
         "CATE": (27.23, 3.71, 9.48, 11.28),
-    }
+}
 ```
 
-- [ ] **Step 4: Run the integration test red, generate derived files, and run it green**
+- [ ] **Step 2: Run the integration test and confirm it fails because the bundle is absent**
 
-Run before generation:
+Run:
 
 ```bash
 .venv/bin/python -m pytest tests/test_experiment.py::test_committed_pilot_summary_matches_observed_results -q
 ```
 
-Resolve any manifest or calculation defect rather than changing expected values without direct raw-evidence inspection. Then generate:
+Expected: fail because `research/experiments/2026-08-16-seven-token-pilot/manifest.json` does not exist. A different failure must be corrected before proceeding.
+
+- [ ] **Step 3: Copy the canonical raw evidence byte-for-byte**
+
+Create the bundle directories, then copy only these files from `results/`:
+
+```text
+candidates-20260816T094029Z.csv
+flows-ethereum-0x40aaf75454.json
+flows-base-0xadf4d5b9d7.json
+flows-base-0xadfd54cb29.json
+flows-base-0xadf9afd4fa.json
+flows-base-0xadf0d31463.json
+flows-solana-A13oRB9FFaiU.json
+flows-solana-Ai66LHZG9MCz.json
+```
+
+Do not copy `.env`, cache files, the byte-identical earlier candidates CSV, or `flows-solana-Ai66LHZG9MCz.pre-pilot.json`.
+
+- [ ] **Step 4: Write the manifest with exact checksums and provenance**
+
+Use these immutable checksums:
+
+```text
+candidates-20260816T094029Z.csv  4ed384e23a9156017e358c524ae8c837f40c251ec993d819e88fe801bb8fba43
+flows-ethereum-0x40aaf75454.json  b13039c4a9afd6f66ab621b9c0164892f8e625847e75c6bf71f68e2d358f4a3f
+flows-base-0xadf4d5b9d7.json  680fe1da9c1a317a975ad4a5b8ba347b0d391a7a14abd9740eae620bcd4c2785
+flows-base-0xadfd54cb29.json  3a50c97dfce1c4ce85b84a8bd65950ef09a3c409481347e158d95c1dcf603581
+flows-base-0xadf9afd4fa.json  4f2b87e2df8e7909f10cd584023bdc71e1aebf3ac7223ca25bd6902de71fe243
+flows-base-0xadf0d31463.json  469c9195c9d262dee393ae68ab5b78bbc9ffcd649da405303fcaf90e62f8b463
+flows-solana-A13oRB9FFaiU.json  7986503809d72c19b9cb5ab234ea416370edb3c3b9d35e26644bd6e43046472a
+flows-solana-Ai66LHZG9MCz.json  acf08cb859a347ed48346c154c7a9ace17d6301d3789237f106848079013c8f5
+```
+
+All seven flow files have 96 rows from `2026-08-12T10:00:00Z` through `2026-08-16T09:00:00Z`, with 95 complete rows. Record each file's retrieval time from the design specification evidence audit and record the original invocation using `--days 4 --limit 100`. Mark the exact original request boundaries as unavailable because the old CLI did not persist them.
+
+The cohort must contain CDXR, AI-HEDGE-FUND, CHEAT.SH, MONGO, PRISMA, TOAD, and CATE with the addresses and chain assignments from the approved design context. Copy selection-time market cap, liquidity, age, netflow, and normalized price change from the candidate CSV by matching address.
+
+- [ ] **Step 5: Run the integration test green and generate deterministic derived files**
+
+Run:
+
+```bash
+.venv/bin/python -m pytest tests/test_experiment.py::test_committed_pilot_summary_matches_observed_results -q
+```
+
+Expected: pass. Resolve any manifest or calculation defect rather than changing expected values without direct raw-evidence inspection. Then generate:
 
 ```bash
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json
 ```
 
-Run the integration test again; expected: pass.
+Run `analyze --check`; expected: all three derived files verify.
 
-- [ ] **Step 5: Write the reviewed report, ledger, graph, and README section**
+- [ ] **Step 6: Write the reviewed report, ledger, graph, and README section**
 
 `REPORT.md` must state the seven-line summary, event-weighted timing analysis, CDXR's immature 24-hour label, endpoint limitations, selection bias, no-trading-advice disclaimer, excluded duplicate/pre-pilot artifacts, and Nansen attribution.
 
@@ -1081,7 +1091,7 @@ Add a README section with:
 
 and explain that `results/` is scratch space while `research/experiments/` is committed evidence.
 
-- [ ] **Step 6: Verify attribution, secrets, determinism, and tests**
+- [ ] **Step 7: Verify attribution, secrets, determinism, and tests**
 
 ```bash
 rg -n "Powered by Nansen API|redistribution-guide" README.md docs research/experiments/2026-08-16-seven-token-pilot/REPORT.md
@@ -1093,7 +1103,7 @@ git status --short
 
 Verify explicitly that `.env`, `data/cache/`, `results/`, and `.request.json` scratch sidecars are absent from `git status`.
 
-- [ ] **Step 7: Commit Task 5**
+- [ ] **Step 8: Commit Task 5**
 
 ```bash
 git add README.md docs/RESEARCH-LEDGER.md docs/RESEARCH-GRAPH.md tests/test_experiment.py research/experiments/2026-08-16-seven-token-pilot
