@@ -17,10 +17,9 @@ DEFAULT_CHAINS = ["solana", "ethereum", "base", "bnb", "arbitrum"]
 def normalize_price_change(x):
     if x is None:
         return None
-    x = float(x)
-    # A value like 0.33 is likely 33%; a value like 33 is already percentage points.
-    # Keep this heuristic visible in output so it can be checked against live API data.
-    return x * 100.0 if -1.5 <= x <= 1.5 else x
+    # Nansen Token Screener returns price_change as a decimal return:
+    # 0.167... means +16.7%, 2.163... means +216.3%.
+    return float(x) * 100.0
 
 
 def cmd_smoke(args):
@@ -79,7 +78,6 @@ def cmd_candidates(args):
     if len(df):
         print(df.to_string(index=False))
     print(f"\nSaved: {path}")
-    print("NOTE: verify price_change units from the returned live rows before treating bucket labels as final.")
 
 
 def cmd_flows(args):
