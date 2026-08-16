@@ -81,6 +81,22 @@ def cmd_candidates(args):
     print(f"\nSaved: {path}")
 
 
+def write_flow_artifacts(*, body, payload, output_path, retrieved_at):
+    response_path = Path(output_path)
+    response_path.parent.mkdir(parents=True, exist_ok=True)
+    response_path.write_text(json.dumps(body, indent=2, ensure_ascii=False) + "\n")
+    request_path = response_path.with_name(f"{response_path.stem}.request.json")
+    metadata = {
+        "schema_version": 1,
+        "endpoint": "tgm/flows",
+        "payload": payload,
+        "retrieved_at": retrieved_at,
+        "response_file": response_path.name,
+    }
+    request_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False, sort_keys=True) + "\n")
+    return response_path, request_path
+
+
 def cmd_flows(args):
     c = NansenClient()
     end = datetime.now(timezone.utc) if args.to is None else datetime.fromisoformat(args.to.replace("Z", "+00:00"))
@@ -94,12 +110,17 @@ def cmd_flows(args):
         "order_by": [{"field": "date", "direction": "ASC"}],
     }
     body = c.post("tgm/flows", payload, refresh=args.refresh)
+    retrieved_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     rows = body.get("data", [])
-    Path("results").mkdir(exist_ok=True)
     safe = args.token[:12].replace("/", "_")
-    path = Path("results") / f"flows-{args.chain}-{safe}.json"
-    path.write_text(json.dumps(body, indent=2, ensure_ascii=False))
-    print(f"received {len(rows)} flow snapshots; saved {path}")
+    path = args.output if args.output is not None else Path("results") / f"flows-{args.chain}-{safe}.json"
+    response_path, _ = write_flow_artifacts(
+        body=body,
+        payload=payload,
+        output_path=path,
+        retrieved_at=retrieved_at,
+    )
+    print(f"received {len(rows)} flow snapshots; saved {response_path}")
     for row in rows[:10]:
         print(json.dumps(row, ensure_ascii=False))
 
@@ -144,6 +165,7 @@ def build_parser():
     s.add_argument("--from", dest="from_")
     s.add_argument("--to")
     s.add_argument("--limit", type=int, default=100)
+    s.add_argument("--output")
     s.add_argument("--refresh", action="store_true")
     s.set_defaults(func=cmd_flows)
 

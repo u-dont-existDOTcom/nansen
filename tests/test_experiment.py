@@ -17,7 +17,39 @@ from src.nansen_signal_lab.experiment import (
     load_and_validate_manifest,
     prepare_flow_rows,
 )
-from src.nansen_signal_lab.cli import build_parser
+from src.nansen_signal_lab.cli import build_parser, write_flow_artifacts
+
+
+def test_write_flow_artifacts_preserves_payload_and_response(tmp_path):
+    output = tmp_path / "raw" / "cdxr-followup.json"
+    payload = {
+        "chain": "ethereum",
+        "token_address": "0x40aaf75454036bed56f3266ccf18f6b7befd6aca",
+        "date": {"from": "2026-08-15T22:00:00Z", "to": "2026-08-16T23:00:00Z"},
+        "label": "smart_money",
+        "pagination": {"page": 1, "per_page": 100},
+        "order_by": [{"field": "date", "direction": "ASC"}],
+    }
+    response_path, request_path = write_flow_artifacts(
+        body={"data": []},
+        payload=payload,
+        output_path=output,
+        retrieved_at="2026-08-16T23:01:00Z",
+    )
+    assert json.loads(response_path.read_text()) == {"data": []}
+    metadata = json.loads(request_path.read_text())
+    assert metadata["endpoint"] == "tgm/flows"
+    assert metadata["payload"] == payload
+    assert metadata["retrieved_at"] == "2026-08-16T23:01:00Z"
+    assert "apikey" not in request_path.read_text().lower()
+
+
+def test_flows_parser_accepts_explicit_output():
+    args = build_parser().parse_args([
+        "flows", "--chain", "ethereum", "--token", "0xtoken",
+        "--days", "2", "--output", "research/raw/flows.json",
+    ])
+    assert args.output == "research/raw/flows.json"
 
 
 def flow_row(hour, price, holdings, *, complete=True, holders=2):
