@@ -6,12 +6,12 @@ Stable node IDs preserve the lineage from the frozen hypothesis to observations,
 flowchart LR
     hyp_smart_money_timing["Hypothesis: accumulation timing may matter"]
     exp_20260816_seven_token_pilot["Experiment: 2026-08-16 seven-token pilot"]
-    obs_cdxr_flat_accumulation["Observation: CDXR accumulation with flat price; late 24h label immature"]
+    obs_cdxr_flat_accumulation["Observation: CDXR bucket available at 22:00 after flat-price accumulation; late 24h label immature"]
     obs_weakness_continues["Observation: AI-HEDGE-FUND and MONGO accumulation into continued weakness"]
     obs_momentum_participation["Observation: CHEAT.SH and PRISMA momentum participation"]
     obs_toad_no_reversal["Observation: TOAD accumulation without observed reversal"]
     obs_cate_mixed["Observation: CATE mixed, modest momentum participation"]
-    lim_selected_endpoint_window["Limitations: selected cohort, endpoint scope, short window, right censoring"]
+    lim_selected_endpoint_window["Limitations: selected cohort, endpoint scope, bucket-end availability, short window, right censoring"]
     next_cdxr_fixed_window["Next test: fixed-window CDXR 24h follow-up"]
 
     hyp_smart_money_timing --> exp_20260816_seven_token_pilot

@@ -72,9 +72,9 @@ The existing ignored `results/` and `data/cache/` directories remain scratch spa
 - derivation configuration, including trailing and forward horizons;
 - known provenance gaps.
 
-The current CLI used relative `--days 4` windows and did not persist the exact request payload. The first manifest will say so explicitly, record the invocation, file modification time, and exact observed interval, and must not invent unavailable timestamps. Future collection commands will persist exact request payloads alongside responses.
+The legacy CLI used relative `--days 4` windows and did not persist the exact request payload. The first manifest says so explicitly, records the invocation, file modification time, and exact observed interval, and does not invent unavailable timestamps. Current flow collection persists the exact request payload alongside each response, distinguishes cache status, original response retrieval time, and artifact write time, and records the response SHA-256. Legacy raw-only cache entries use file mtime as an explicit retrieval-time fallback.
 
-Manifest paths are relative to the bundle. Validation fails on a missing file, checksum mismatch, unsupported schema version, duplicate token identity, or inconsistent observed range.
+Manifest paths are relative to the bundle. Validation fails on a missing file, checksum mismatch, unsupported schema version, invalid kind/endpoint pair, inconsistent raw row/count/completeness/range provenance, mismatched request/cohort identity, invalid evidence references, duplicate token identity, or inconsistent observed range. EVM-style `0x` addresses are case-insensitive; Solana addresses remain case-sensitive.
 
 ## Raw evidence policy
 
@@ -95,13 +95,13 @@ The repository is public. Nansen's redistribution guide currently marks Token Sc
 
 Normal mode validates the bundle and regenerates all derived CSV files deterministically. `--check` regenerates in memory and fails if committed derived files differ; it does not modify files.
 
-Rows are ordered by timestamp. Duplicate timestamps are rejected. The final incomplete bucket and any row missing price or holdings are excluded and counted. Hourly gaps are reported and block horizon calculations that would cross them.
+Both `date` and `bucket_end` are parsed as timezone-aware ISO-8601 timestamps, and `bucket_end` must be later than `date`. A completed bucket becomes available at `bucket_end`; this availability instant is the feature/event `timestamp` used by every trailing and forward horizon lookup. The original boundaries remain in `source_bucket_start` and `source_bucket_end`. Rows are ordered by availability timestamp and duplicates are rejected. The final incomplete bucket is excluded and counted. Rows with prices that are not finite and positive, or holdings that are not finite and non-negative, are excluded and counted. Hourly gaps are reported and block horizon calculations that would cross them.
 
 ## Prediction-ready outputs
 
 `hourly-features.csv` contains one row per valid token-hour with:
 
-- experiment ID, cohort role, chain, token symbol, address, and timestamp;
+- experiment ID, cohort role, chain, token symbol, address, bucket-end availability timestamp, source bucket start, and source bucket end;
 - price, aggregate Smart-Money token holdings, USD value, and holder count;
 - one-hour holdings delta in tokens, percent, and approximate USD notional;
 - trailing price returns at 1h, 4h, 12h, and 24h;
@@ -113,7 +113,7 @@ Rows are ordered by timestamp. Duplicate timestamps are rejected. The final inco
 
 `token-summary.csv` reproduces the seven-line endpoint summary and adds gross accumulation, gross distribution, net holdings change, count of accumulation events, size-weighted trailing returns, and size-weighted forward returns over mature windows.
 
-No feature may read a row after its event timestamp. Forward returns, MFE, and MAE are labels only and must never be included as model inputs.
+No feature may read a row after its bucket-end availability timestamp. Forward returns, MFE, and MAE are labels only and must never be included as model inputs.
 
 ## Research report and graph
 
@@ -147,7 +147,7 @@ Graph nodes link to the experiment report; numeric claims live in committed CSV 
 
 ## Follow-up collection
 
-The first next test is a fixed-window CDXR follow-up after 2026-08-16 22:00 UTC, when the largest 2026-08-15 22:00 UTC accumulation event has a complete 24-hour label. The follow-up uses explicit `--from` and `--to` timestamps and creates new immutable evidence rather than overwriting the pilot response.
+The first next test is a fixed-window CDXR follow-up after 2026-08-16 22:00 UTC, when the accumulation bucket starting at 2026-08-15 21:00 UTC and available at its 22:00 UTC end has a complete 24-hour label. The follow-up uses explicit `--from` and `--to` timestamps and creates new immutable evidence rather than overwriting the pilot response.
 
 Later work expands horizons to 3d and 7d, adds eligible-token controls, uses an external OHLCV source for independent price validation, and freezes discovery/holdout splits before threshold fitting.
 
@@ -160,13 +160,17 @@ Analysis stops with a clear error when evidence is missing, mutated, malformed, 
 Focused tests cover:
 
 - manifest validation and checksum mismatch detection;
+- kind-specific provenance, raw-count/range, and cohort/evidence reference validation;
 - exclusion of incomplete buckets;
-- duplicate and gap handling;
+- timezone-aware bucket-end availability, duplicate and gap handling;
+- malformed/non-finite price and holdings exclusion;
 - trailing and forward return calculations;
 - absence of forward labels before a horizon matures;
 - MFE and MAE calculations;
 - deterministic output ordering and regeneration;
-- preservation of the current seven-token summary values.
+- preservation of the current seven-token summary values;
+- cache-hit/network retrieval provenance and legacy-cache fallback;
+- explicit-output overwrite refusal, forced replacement, response hashing, and temporary-file cleanup.
 
 Completion requires the full test suite, a successful bundle validation, deterministic `analyze --check`, a secret scan of staged paths, and a clean Git diff containing only intended research-memory changes.
 
