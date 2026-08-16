@@ -17,6 +17,7 @@ from src.nansen_signal_lab.experiment import (
     load_and_validate_manifest,
     prepare_flow_rows,
 )
+import src.nansen_signal_lab.cli as cli
 from src.nansen_signal_lab.cli import build_parser, write_flow_artifacts
 
 
@@ -50,6 +51,49 @@ def test_flows_parser_accepts_explicit_output():
         "--days", "2", "--output", "research/raw/flows.json",
     ])
     assert args.output == "research/raw/flows.json"
+
+
+def test_cmd_flows_default_output_writes_response_and_request_sidecar(tmp_path, monkeypatch):
+    body = {
+        "data": [{
+            "date": "2026-08-16T22:00:00Z",
+            "bucket_end": "2026-08-16T23:00:00Z",
+            "is_complete": True,
+            "price_usd": 1.25,
+            "token_amount": 80,
+        }],
+    }
+
+    class FakeNansenClient:
+        def post(self, endpoint, payload, *, refresh=False):
+            assert endpoint == "tgm/flows"
+            assert payload["chain"] == "ethereum"
+            assert payload["token_address"] == "0xtoken"
+            return body
+
+    monkeypatch.setattr(cli, "NansenClient", FakeNansenClient)
+    monkeypatch.chdir(tmp_path)
+    args = cli.build_parser().parse_args([
+        "flows", "--chain", "ethereum", "--token", "0xtoken",
+        "--from", "2026-08-16T22:00:00Z", "--to", "2026-08-16T23:00:00Z",
+    ])
+    args.func(args)
+
+    response_path = tmp_path / "results" / "flows-ethereum-0xtoken.json"
+    request_path = tmp_path / "results" / "flows-ethereum-0xtoken.request.json"
+    assert json.loads(response_path.read_text()) == body
+    metadata = json.loads(request_path.read_text())
+    assert metadata["endpoint"] == "tgm/flows"
+    assert metadata["response_file"] == response_path.name
+    assert metadata["payload"] == {
+        "chain": "ethereum",
+        "token_address": "0xtoken",
+        "date": {"from": "2026-08-16T22:00:00Z", "to": "2026-08-16T23:00:00Z"},
+        "label": "smart_money",
+        "pagination": {"page": 1, "per_page": 100},
+        "order_by": [{"field": "date", "direction": "ASC"}],
+    }
+    assert metadata["retrieved_at"].endswith("Z")
 
 
 def flow_row(hour, price, holdings, *, complete=True, holders=2):
