@@ -9,6 +9,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from .client import NansenClient
+from .experiment import analyze_manifest
 from .metrics import accumulation_class, flow_market_cap_ratio
 
 DEFAULT_CHAINS = ["solana", "ethereum", "base", "bnb", "arbitrum"]
@@ -112,6 +113,13 @@ def cmd_plan(args):
     print("No API calls were made.")
 
 
+def cmd_analyze(args):
+    paths = analyze_manifest(args.manifest, check=args.check)
+    prefix = "verified: " if args.check else ""
+    for path in paths:
+        print(f"{prefix}{path}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="nansen-lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -142,6 +150,11 @@ def build_parser():
     s = sub.add_parser("plan", help="show call/credit budget without calling Nansen")
     s.add_argument("--tokens", type=int, default=10)
     s.set_defaults(func=cmd_plan)
+
+    s = sub.add_parser("analyze", help="generate or verify a committed research bundle")
+    s.add_argument("--manifest", required=True)
+    s.add_argument("--check", action="store_true")
+    s.set_defaults(func=cmd_analyze)
     return p
 
 
