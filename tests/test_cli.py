@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import multiprocessing
+import os
 import threading
 from types import SimpleNamespace
 
 import pytest
 
 import src.nansen_signal_lab.cli as cli
+
+
+def _exit_while_holding_artifact_lock(output_path):
+    with cli._artifact_pair_lock(output_path):
+        os._exit(0)
 
 
 def test_write_api_artifacts_preserves_generic_provenance_without_api_key(tmp_path):
@@ -402,4 +409,151 @@ def test_write_api_artifacts_pair_lock_blocks_second_writer_before_targets_chang
     worker.join()
     assert not failures
     assert json.loads(output.read_text()) == {"data": ["new"]}
+    assert not list(tmp_path.glob(".*"))
+
+
+def test_artifact_lock_uses_no_stale_path_sentinel(tmp_path):
+    """Fails if an abrupt writer exit can strand a filesystem lock-path sentinel."""
+    output = tmp_path / "evidence.json"
+
+    with cli._artifact_pair_lock(output):
+        assert not list(tmp_path.glob("*.pair.lock"))
+
+
+def test_artifact_lock_is_released_after_abrupt_owner_exit(tmp_path):
+    """Fails if a killed writer can permanently block later evidence collection."""
+    output = tmp_path / "evidence.json"
+    context = multiprocessing.get_context("fork")
+    holder = context.Process(target=_exit_while_holding_artifact_lock, args=(output,))
+    holder.start()
+    holder.join(timeout=10)
+    assert holder.exitcode == 0
+
+    response_path, request_path = cli.write_api_artifacts(
+        body={"data": []},
+        payload={},
+        endpoint="tgm/who-bought-sold",
+        output_path=output,
+        cache_hit=False,
+        response_retrieved_at="2026-08-02T00:01:00Z",
+        artifact_written_at="2026-08-02T00:02:00Z",
+    )
+
+    assert response_path.exists()
+    assert request_path.exists()
+
+
+def test_write_api_artifacts_cleans_registered_backup_when_later_backup_fails(
+    tmp_path, monkeypatch
+):
+    """Fails if a later backup error leaks an earlier staged backup file."""
+    output = tmp_path / "evidence.json"
+    request = tmp_path / "evidence.request.json"
+    output.write_bytes(b"old response\n")
+    request.write_bytes(b"old sidecar\n")
+    original_files = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+    write_backup = cli._write_sibling_backup
+    calls = 0
+
+    def fail_second_backup(path, content):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected second backup failure")
+        return write_backup(path, content)
+
+    monkeypatch.setattr(cli, "_write_sibling_backup", fail_second_backup)
+
+    with pytest.raises(OSError, match="injected second backup failure"):
+        cli.write_api_artifacts(
+            body={"data": ["new"]},
+            payload={"page": 1},
+            endpoint="tgm/who-bought-sold",
+            output_path=output,
+            cache_hit=False,
+            response_retrieved_at="2026-08-02T00:01:00Z",
+            artifact_written_at="2026-08-02T00:02:00Z",
+        )
+
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == original_files
+
+
+def test_write_api_artifacts_serializes_overwrite_refusal_between_real_writers(
+    tmp_path, monkeypatch
+):
+    """Fails if writer B can pass its overwrite check while writer A commits the pair."""
+    output = tmp_path / "evidence.json"
+    request = tmp_path / "evidence.request.json"
+    response_install_started = threading.Event()
+    release_first_writer = threading.Event()
+    first_response_install = True
+    writer_a_errors = []
+    writer_b_errors = []
+    writer_b_started = threading.Event()
+    writer_b_finished = threading.Event()
+    install_artifact = cli._install_artifact
+
+    def pause_first_response_install(temporary, target):
+        nonlocal first_response_install
+        if target == output and first_response_install:
+            first_response_install = False
+            response_install_started.set()
+            assert release_first_writer.wait(timeout=10)
+        install_artifact(temporary, target)
+
+    monkeypatch.setattr(cli, "_install_artifact", pause_first_response_install)
+
+    def writer_a():
+        try:
+            cli.write_api_artifacts(
+                body={"data": ["A"]},
+                payload={"writer": "A"},
+                endpoint="tgm/who-bought-sold",
+                output_path=output,
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:01:00Z",
+                artifact_written_at="2026-08-02T00:02:00Z",
+                overwrite=False,
+            )
+        except BaseException as exc:
+            writer_a_errors.append(exc)
+
+    def writer_b():
+        try:
+            writer_b_started.set()
+            cli.write_api_artifacts(
+                body={"data": ["B"]},
+                payload={"writer": "B"},
+                endpoint="tgm/who-bought-sold",
+                output_path=output,
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:01:00Z",
+                artifact_written_at="2026-08-02T00:02:00Z",
+                overwrite=False,
+            )
+        except BaseException as exc:
+            writer_b_errors.append(exc)
+        finally:
+            writer_b_finished.set()
+
+    first = threading.Thread(target=writer_a)
+    first.start()
+    assert response_install_started.wait(timeout=10)
+    second = threading.Thread(target=writer_b)
+    second.start()
+    assert writer_b_started.wait(timeout=1)
+    try:
+        assert not writer_b_finished.wait(timeout=0.1)
+    finally:
+        release_first_writer.set()
+    first.join(timeout=10)
+    assert not first.is_alive()
+    assert writer_b_finished.wait(timeout=10)
+    second.join()
+
+    assert not writer_a_errors
+    assert len(writer_b_errors) == 1
+    assert isinstance(writer_b_errors[0], FileExistsError)
+    assert json.loads(output.read_text()) == {"data": ["A"]}
+    assert json.loads(request.read_text())["payload"] == {"writer": "A"}
     assert not list(tmp_path.glob(".*"))

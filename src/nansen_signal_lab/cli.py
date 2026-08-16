@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
 import os
 import tempfile
-import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -123,17 +123,13 @@ def _write_sibling_staged(path, content, *, suffix):
 def _artifact_pair_lock(output_path):
     response_path, _ = _flow_artifact_paths(output_path)
     response_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = response_path.with_name(f".{response_path.name}.pair.lock")
-    while True:
-        try:
-            lock_path.mkdir()
-            break
-        except FileExistsError:
-            time.sleep(0.01)
+    descriptor = os.open(response_path.parent, os.O_RDONLY)
     try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
         yield
     finally:
-        lock_path.rmdir()
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
 
 
 def _install_artifact(temporary, target):
@@ -186,11 +182,9 @@ def write_api_artifacts(
             }
             response_temporary = _write_sibling_temporary(response_path, response_bytes)
             request_temporary = _write_sibling_temporary(request_path, request_bytes)
-            backups = {
-                path: _write_sibling_backup(path, original)
-                for path, original in original_bytes.items()
-                if original is not None
-            }
+            for path, original in original_bytes.items():
+                if original is not None:
+                    backups[path] = _write_sibling_backup(path, original)
             installation_started = True
             _install_artifact(response_temporary, response_path)
             response_temporary = None
