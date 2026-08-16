@@ -70,6 +70,25 @@ def test_prepare_rows_excludes_missing_or_zero_metrics_and_counts_them():
     assert prepared.invalid_metric_count == 3
 
 
+def test_prepare_rows_excludes_string_zero_and_nonfinite_or_malformed_prices():
+    """Fails if price values that cannot safely support return math are accepted."""
+    string_zero = flow_row(0, 10, 100)
+    string_zero["price_usd"] = "0"
+    malformed_price = flow_row(1, 10, 100)
+    malformed_price["price_usd"] = "not-a-number"
+    infinite_price = flow_row(2, 10, 100)
+    infinite_price["price_usd"] = "inf"
+    nan_price = flow_row(3, 10, 100)
+    nan_price["price_usd"] = float("nan")
+
+    prepared = prepare_flow_rows({"data": [
+        string_zero, malformed_price, infinite_price, nan_price,
+    ]})
+
+    assert prepared.rows == ()
+    assert prepared.invalid_metric_count == 4
+
+
 def test_feature_and_event_windows_do_not_cross_gap_or_future():
     """Fails if returns bridge a missing hour or label an immature horizon available."""
     body = {"data": [
@@ -129,6 +148,25 @@ def test_token_summary_weights_only_mature_accumulation_events():
     assert summary["gross_accumulation_tokens"] == 20.0
     assert summary["accumulation_event_count"] == 2
     assert summary["accumulation_weighted_forward_1h_pct"] == pytest.approx(100 * (12 / 11 - 1))
+
+
+def test_token_summary_returns_none_for_24h_change_across_a_gap():
+    """Fails if a 24-hour summary return bridges a missing hourly observation."""
+    next_day = flow_row(0, 34, 124)
+    next_day["date"] = "2026-08-02T00:00:00Z"
+    next_day["bucket_end"] = "2026-08-02T01:00:00Z"
+    prepared = prepare_flow_rows({"data": [
+        flow_row(0, 10, 100),
+        *[flow_row(hour, 10 + hour, 100 + hour) for hour in range(2, 24)],
+        next_day,
+    ]})
+    features = build_hourly_features(
+        experiment_id="fixture", cohort_member=fixture_member(), prepared=prepared, horizons=(1,),
+    )
+    summary = build_token_summary(features, (), prepared, horizons=(1,))
+
+    assert summary["price_return_24h_pct"] is None
+    assert summary["holdings_change_24h_pct"] is None
 
 
 def test_build_analysis_uses_referenced_flow_evidence(tmp_path):
