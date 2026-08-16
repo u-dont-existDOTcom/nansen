@@ -1,0 +1,14 @@
+{
+  "schema_version": 2,
+  "experiment_id": "2026-08-16-community-signal-shadow",
+  "title": "Community-inspired trailing signal shadow",
+  "status": "discovery",
+  "created_at": "2026-08-16T12:00:00Z",
+  "hypothesis": "Persistence, acceleration, holder breadth, retention, and price divergence may distinguish accumulation regimes better than flow magnitude alone.",
+  "feature_set_version": "community-signals-v1",
+  "horizons_hours": [1, 4, 12, 24],
+  "source_manifest": "../2026-08-16-seven-token-pilot/manifest.json",
+  "source_manifest_sha256": "2662998bdf21d2d3b80d11003b8e62db59e1ebee68ad33858f2bf0008c8a93d0",
+  "point_in_time_guarantee": "unknown",
+  "availability_policy": "bucket_end"
+}

@@ -8,6 +8,8 @@ from math import isfinite
 from pathlib import Path
 from typing import Any
 
+from .signals import SUPPORTED_FEATURE_SET, build_signal_features
+
 
 class ExperimentError(RuntimeError):
     pass
@@ -36,6 +38,14 @@ class Bundle:
     @property
     def evidence_by_id(self) -> dict[str, EvidenceFile]:
         return {item.id: item for item in self.evidence}
+
+
+@dataclass(frozen=True)
+class SignalBundle:
+    root: Path
+    manifest_path: Path
+    manifest: dict[str, Any]
+    source_bundle: Bundle
 
 
 @dataclass(frozen=True)
@@ -364,6 +374,94 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
     )
 
 
+def load_signal_manifest(manifest_path: str | Path) -> SignalBundle:
+    path = Path(manifest_path).resolve()
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ExperimentError(f"cannot read manifest {path}: {exc}") from exc
+    context = _experiment_context(manifest)
+    if not isinstance(manifest, dict):
+        raise ExperimentError(f"manifest must be an object ({context})")
+    required = {
+        "schema_version", "experiment_id", "title", "status", "created_at",
+        "hypothesis", "feature_set_version", "horizons_hours", "source_manifest",
+        "source_manifest_sha256", "point_in_time_guarantee", "availability_policy",
+    }
+    missing = sorted(required - set(manifest))
+    if missing:
+        raise ExperimentError(f"manifest missing keys: {', '.join(missing)} ({context})")
+    unknown = sorted(set(manifest) - required)
+    if unknown:
+        raise ExperimentError(f"manifest has unknown keys: {', '.join(unknown)} ({context})")
+    if manifest["schema_version"] != 2:
+        raise ExperimentError(
+            f"unsupported signal schema version: {manifest['schema_version']} ({context})"
+        )
+    status = manifest["status"]
+    if status not in {"discovery", "holdout"}:
+        raise ExperimentError(f"invalid experiment status: {status} ({context})")
+    guarantee = manifest["point_in_time_guarantee"]
+    if guarantee not in {"provider_pit", "live_snapshot", "unknown"}:
+        raise ExperimentError(
+            f"invalid point_in_time_guarantee: {guarantee} ({context})"
+        )
+    if status == "holdout" and guarantee == "unknown":
+        raise ExperimentError(
+            f"point-in-time guarantee unknown is discovery-only ({context})"
+        )
+    if manifest["availability_policy"] != "bucket_end":
+        raise ExperimentError(
+            f"availability_policy must be bucket_end ({context})"
+        )
+    if manifest["feature_set_version"] != SUPPORTED_FEATURE_SET:
+        raise ExperimentError(
+            f"unsupported feature set: {manifest['feature_set_version']} ({context})"
+        )
+    horizons = manifest["horizons_hours"]
+    if (
+        not isinstance(horizons, list)
+        or not horizons
+        or any(
+            not isinstance(value, int) or isinstance(value, bool) or value <= 0
+            for value in horizons
+        )
+        or len(horizons) != len(set(horizons))
+    ):
+        raise ExperimentError(
+            f"horizons_hours must contain unique positive integers ({context})"
+        )
+    root = path.parent.resolve()
+    source_path = (root / str(manifest["source_manifest"])).resolve()
+    experiments_root = root.parent.resolve()
+    if (
+        source_path.name != "manifest.json"
+        or source_path.parent == root
+        or source_path.parent.parent != experiments_root
+    ):
+        raise ExperimentError(
+            f"source manifest must be a sibling bundle under {experiments_root}: {source_path}"
+        )
+    expected_hash = str(manifest["source_manifest_sha256"])
+    actual_hash = sha256_file(source_path)
+    if actual_hash != expected_hash:
+        raise ExperimentError(
+            f"source manifest checksum mismatch: expected {expected_hash}, got {actual_hash}"
+        )
+    source_bundle = load_and_validate_manifest(source_path)
+    source_horizons = set(source_bundle.manifest["horizons_hours"])
+    if not set(horizons).issubset(source_horizons):
+        raise ExperimentError(
+            f"horizons_hours must be a subset of source horizons ({context})"
+        )
+    return SignalBundle(
+        root=root,
+        manifest_path=path,
+        manifest=manifest,
+        source_bundle=source_bundle,
+    )
+
+
 def prepare_flow_rows(body: dict[str, Any]) -> PreparedRows:
     raw_rows = body.get("data")
     if not isinstance(raw_rows, list):
@@ -621,6 +719,33 @@ def build_analysis(bundle: Bundle) -> AnalysisTables:
     )
 
 
+def build_signal_analysis(bundle: SignalBundle) -> tuple[dict[str, Any], ...]:
+    horizons = tuple(sorted(int(value) for value in bundle.manifest["horizons_hours"]))
+    source_features = build_analysis(bundle.source_bundle).hourly_features
+    by_token: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for feature in source_features:
+        key = (feature["chain"], feature["symbol"], feature["address"])
+        source = dict(feature)
+        source["token_address"] = feature["address"]
+        by_token.setdefault(key, []).append(source)
+
+    signal_rows = []
+    for features in by_token.values():
+        signal_rows.extend(build_signal_features(
+            tuple(features),
+            horizons=horizons,
+            source_experiment_id=bundle.source_bundle.experiment_id,
+            feature_set_version=bundle.manifest["feature_set_version"],
+        ))
+
+    fields = signal_fieldnames(horizons)
+    normalized = ({field: row.get(field) for field in fields} for row in signal_rows)
+    return tuple(sorted(
+        normalized,
+        key=lambda row: (row["chain"], row["symbol"], row["timestamp"]),
+    ))
+
+
 def csv_text(rows: tuple[dict[str, Any], ...], fieldnames: tuple[str, ...]) -> str:
     output = StringIO(newline="")
     writer = csv.DictWriter(
@@ -679,6 +804,34 @@ def analysis_fieldnames(horizons: tuple[int, ...]) -> tuple[tuple[str, ...], tup
     return feature, event, summary
 
 
+def signal_fieldnames(horizons: tuple[int, ...]) -> tuple[str, ...]:
+    return (
+        "source_experiment_id",
+        "feature_set_version",
+        "chain",
+        "symbol",
+        "token_address",
+        "timestamp",
+    ) + tuple(
+        name
+        for horizon in horizons
+        for name in (
+            f"holdings_change_{horizon}h_pct",
+            f"price_return_{horizon}h_pct",
+            f"positive_holdings_delta_hours_{horizon}h",
+            f"negative_holdings_delta_hours_{horizon}h",
+            f"accumulation_persistence_{horizon}h",
+            f"distribution_persistence_{horizon}h",
+            f"holdings_velocity_{horizon}h_pct_per_hour",
+            f"holdings_acceleration_{horizon}h_pct_per_hour",
+            f"holder_count_change_{horizon}h",
+            f"accumulation_retention_{horizon}h",
+            f"flow_price_divergence_{horizon}h_pct",
+            f"market_phase_{horizon}h",
+        )
+    )
+
+
 def render_analysis_csvs(bundle: Bundle, tables: AnalysisTables) -> dict[str, str]:
     horizons = tuple(sorted(int(value) for value in bundle.manifest["horizons_hours"]))
     feature_fields, event_fields, summary_fields = analysis_fieldnames(horizons)
@@ -689,7 +842,36 @@ def render_analysis_csvs(bundle: Bundle, tables: AnalysisTables) -> dict[str, st
     }
 
 
+def _peek_manifest_schema_version(manifest_path: str | Path) -> Any:
+    path = Path(manifest_path).resolve()
+    try:
+        manifest = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ExperimentError(f"cannot read manifest {path}: {exc}") from exc
+    return manifest.get("schema_version") if isinstance(manifest, dict) else None
+
+
 def analyze_manifest(manifest_path: str | Path, *, check: bool = False) -> tuple[Path, ...]:
+    if _peek_manifest_schema_version(manifest_path) == 2:
+        signal_bundle = load_signal_manifest(manifest_path)
+        horizons = tuple(sorted(
+            int(value) for value in signal_bundle.manifest["horizons_hours"]
+        ))
+        rendered = csv_text(
+            build_signal_analysis(signal_bundle),
+            signal_fieldnames(horizons),
+        )
+        path = signal_bundle.root / "derived" / "signal-features.csv"
+        if check:
+            if not path.is_file() or path.read_bytes() != rendered.encode("utf-8"):
+                raise ExperimentError(f"derived output differs: {path}")
+            return (path,)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(rendered, encoding="utf-8", newline="")
+        temporary.replace(path)
+        return (path,)
+
     bundle = load_and_validate_manifest(manifest_path)
     tables = build_analysis(bundle)
     rendered = render_analysis_csvs(bundle, tables)

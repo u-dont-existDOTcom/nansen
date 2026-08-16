@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import src.nansen_signal_lab.experiment as experiment
 from src.nansen_signal_lab.experiment import (
     ExperimentError,
     analyze_manifest,
@@ -513,6 +515,248 @@ def write_bundle_with_four_hour_flow_fixture(tmp_path: Path) -> Path:
     return manifest
 
 
+def write_signal_bundle(tmp_path: Path) -> tuple[Path, Path]:
+    experiments = tmp_path / "research" / "experiments"
+    source_root = experiments / "source"
+    source_root.mkdir(parents=True)
+    source_manifest = write_bundle_with_four_hour_flow_fixture(source_root)
+
+    signal_root = experiments / "signal-shadow"
+    signal_root.mkdir()
+    manifest = {
+        "schema_version": 2,
+        "experiment_id": "signal-shadow",
+        "title": "Signal shadow",
+        "status": "discovery",
+        "created_at": "2026-08-16T12:00:00Z",
+        "hypothesis": "Trailing community-inspired components may separate regimes.",
+        "feature_set_version": "community-signals-v1",
+        "horizons_hours": [1, 2],
+        "source_manifest": "../source/manifest.json",
+        "source_manifest_sha256": hashlib.sha256(source_manifest.read_bytes()).hexdigest(),
+        "point_in_time_guarantee": "unknown",
+        "availability_policy": "bucket_end",
+    }
+    signal_manifest = signal_root / "manifest.json"
+    signal_manifest.write_text(json.dumps(manifest))
+    return signal_manifest, source_manifest
+
+
+def test_signal_manifest_loads_strict_companion_and_validated_v1_source(tmp_path):
+    """Fails if a valid schema-v2 companion cannot bind to its exact schema-v1 source."""
+    manifest, source_manifest = write_signal_bundle(tmp_path)
+
+    bundle = experiment.load_signal_manifest(manifest)
+
+    assert bundle.root == manifest.parent.resolve()
+    assert bundle.manifest_path == manifest.resolve()
+    assert bundle.manifest["experiment_id"] == "signal-shadow"
+    assert bundle.source_bundle.manifest_path == source_manifest.resolve()
+    assert bundle.source_bundle.manifest["schema_version"] == 1
+
+
+@pytest.mark.parametrize(("mutation", "message"), [
+    (lambda data: data.update({"unexpected": True}), "unknown keys: unexpected"),
+    (lambda data: data.pop("title"), "missing keys: title"),
+])
+def test_signal_manifest_rejects_unknown_or_missing_keys(tmp_path, mutation, message):
+    """Fails if schema-v2 accepts a widened or incomplete top-level contract."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    mutation(data)
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match=message):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_rejects_non_v2_companion_schema(tmp_path):
+    """Fails if the explicit v2 loader silently accepts another manifest schema."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["schema_version"] = 1
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="unsupported signal schema version: 1"):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_rejects_source_outside_sibling_experiments_directory(tmp_path):
+    """Fails if source_manifest can escape the companion's resolved experiments parent."""
+    manifest, source_manifest = write_signal_bundle(tmp_path)
+    outside = tmp_path / "outside"
+    shutil.copytree(source_manifest.parent, outside)
+    outside_manifest = outside / "manifest.json"
+    data = json.loads(manifest.read_text())
+    data["source_manifest"] = "../../../outside/manifest.json"
+    data["source_manifest_sha256"] = hashlib.sha256(outside_manifest.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="source manifest must be a sibling bundle"):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_rejects_source_hash_mismatch(tmp_path):
+    """Fails if a companion can silently bind to source-manifest byte drift."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["source_manifest_sha256"] = "0" * 64
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="source manifest checksum mismatch"):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_rejects_non_v1_source_manifest(tmp_path):
+    """Fails if a companion can bind to anything except a validated schema-v1 bundle."""
+    manifest, source_manifest = write_signal_bundle(tmp_path)
+    source = json.loads(source_manifest.read_text())
+    source["schema_version"] = 2
+    source_manifest.write_text(json.dumps(source))
+    data = json.loads(manifest.read_text())
+    data["source_manifest_sha256"] = hashlib.sha256(source_manifest.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="unsupported schema version: 2"):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_rejects_unsupported_feature_set(tmp_path):
+    """Fails if a companion can select unimplemented signal formulas."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["feature_set_version"] = "community-signals-v2"
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="unsupported feature set"):
+        experiment.load_signal_manifest(manifest)
+
+
+@pytest.mark.parametrize("horizons", [[], [0], [1, 1], [True], "1"])
+def test_signal_manifest_requires_nonempty_unique_positive_horizons(tmp_path, horizons):
+    """Fails if a signal horizon is empty, duplicated, non-positive, boolean, or non-list."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["horizons_hours"] = horizons
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(
+        ExperimentError, match="horizons_hours must contain unique positive integers"
+    ):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_requires_horizons_to_be_source_subset(tmp_path):
+    """Fails if the companion requests a horizon absent from its schema-v1 source."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["horizons_hours"] = [1, 3]
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="horizons_hours must be a subset of source"):
+        experiment.load_signal_manifest(manifest)
+
+
+@pytest.mark.parametrize(("status", "guarantee", "message"), [
+    ("holdout", "unknown", "point-in-time guarantee unknown is discovery-only"),
+    ("discovery", "retrospective", "invalid point_in_time_guarantee"),
+    ("invalid", "provider_pit", "invalid experiment status"),
+])
+def test_signal_manifest_enforces_status_guarantee_matrix(
+    tmp_path, status, guarantee, message
+):
+    """Fails if holdout accepts unknown provenance or either field accepts unknown values."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["status"] = status
+    data["point_in_time_guarantee"] = guarantee
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match=message):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_requires_bucket_end_availability(tmp_path):
+    """Fails if signal timestamps can claim availability before finalized bucket end."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["availability_policy"] = "bucket_start"
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="availability_policy must be bucket_end"):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_fieldnames_are_identity_then_exact_trailing_signal_whitelist():
+    """Fails if the persisted table gains raw, selection, buyer, or forward-label fields."""
+    assert experiment.signal_fieldnames((2,)) == (
+        "source_experiment_id",
+        "feature_set_version",
+        "chain",
+        "symbol",
+        "token_address",
+        "timestamp",
+        "holdings_change_2h_pct",
+        "price_return_2h_pct",
+        "positive_holdings_delta_hours_2h",
+        "negative_holdings_delta_hours_2h",
+        "accumulation_persistence_2h",
+        "distribution_persistence_2h",
+        "holdings_velocity_2h_pct_per_hour",
+        "holdings_acceleration_2h_pct_per_hour",
+        "holder_count_change_2h",
+        "accumulation_retention_2h",
+        "flow_price_divergence_2h_pct",
+        "market_phase_2h",
+    )
+
+
+def test_build_signal_analysis_sorts_rows_and_keeps_only_declared_fields(tmp_path):
+    """Fails if v1 selection/raw/forward columns leak into the trailing signal table."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    bundle = experiment.load_signal_manifest(manifest)
+
+    rows = experiment.build_signal_analysis(bundle)
+
+    fields = experiment.signal_fieldnames((1, 2))
+    assert len(rows) == 4
+    assert all(tuple(row) == fields for row in rows)
+    assert [(row["chain"], row["symbol"], row["timestamp"]) for row in rows] == sorted(
+        (row["chain"], row["symbol"], row["timestamp"]) for row in rows
+    )
+    assert {row["token_address"] for row in rows} == {"0xfixture"}
+    assert not any(
+        any(marker in field for marker in ("selection_", "buyer", "forward_", "mfe_", "mae_"))
+        for field in fields
+    )
+
+
+def test_analyze_v2_writes_one_atomic_byte_identical_signal_csv(tmp_path):
+    """Fails if schema-v2 writes extra tables, leaves staging files, or renders unstably."""
+    manifest, _ = write_signal_bundle(tmp_path)
+
+    paths = analyze_manifest(manifest)
+    first = paths[0].read_bytes()
+    repeated = analyze_manifest(manifest)
+
+    assert tuple(path.name for path in paths) == ("signal-features.csv",)
+    assert repeated == paths
+    assert paths[0].read_bytes() == first
+    assert not list(paths[0].parent.glob("*.tmp"))
+
+
+def test_analyze_v2_check_accepts_exact_bytes_and_rejects_one_byte_mutation(tmp_path):
+    """Fails if schema-v2 check mode cannot distinguish exact output from byte drift."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    paths = analyze_manifest(manifest)
+
+    assert analyze_manifest(manifest, check=True) == paths
+    paths[0].write_bytes(paths[0].read_bytes() + b"x")
+
+    with pytest.raises(ExperimentError, match="derived output differs"):
+        analyze_manifest(manifest, check=True)
+
+
 def test_analyze_writes_deterministic_csvs(tmp_path):
     """Fails if regeneration changes committed CSV bytes or omits a table."""
     manifest = write_bundle_with_four_hour_flow_fixture(tmp_path)
@@ -524,6 +768,26 @@ def test_analyze_writes_deterministic_csvs(tmp_path):
 
     assert first == second
     assert set(first) == {"hourly-features.csv", "event-windows.csv", "token-summary.csv"}
+
+
+def test_committed_v1_analysis_bytes_are_frozen(tmp_path):
+    """Fails if schema-v1 dispatch, table order, columns, or rendered bytes drift."""
+    committed = Path("research/experiments/2026-08-16-seven-token-pilot")
+    copied = tmp_path / committed.name
+    shutil.copytree(committed, copied)
+
+    paths = analyze_manifest(copied / "manifest.json", check=True)
+
+    assert tuple(path.name for path in paths) == (
+        "hourly-features.csv",
+        "event-windows.csv",
+        "token-summary.csv",
+    )
+    assert {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in paths} == {
+        "hourly-features.csv": "236802e99c79d7a75870b31b2578567bf186a6792939ccedade980af3d0e4061",
+        "event-windows.csv": "3e1066ee3e2ddfc333c8c39347518cd7a86a17fba45ebe6631944dc8b23e838e",
+        "token-summary.csv": "65d73fd8890b7b9f8162006568d4ad99579b4a4596d7869bb39475c691492ce7",
+    }
 
 
 def test_csv_text_rejects_unknown_output_fields():
