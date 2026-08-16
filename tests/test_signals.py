@@ -80,6 +80,13 @@ def test_output_is_trailing_whitelist_only():
     assert not any(any(marker in key for marker in ("selection_", "buyer", "forward_", "mfe_", "mae_")) for key in row)
 
 
+def test_output_excludes_selection_and_unknown_availability_fields():
+    item = {**_fixture()[6], "selection_available": True, "mystery_available": True}
+    row = build_signal_features((item,), horizons=(2,), source_experiment_id="e", feature_set_version="community-signals-v1")[0]
+    assert "selection_available" not in row
+    assert "mystery_available" not in row
+
+
 @pytest.mark.parametrize("kwargs", [
     {"feature_set_version": "community-signals-v2", "horizons": (2,)},
     {"feature_set_version": "community-signals-v1", "horizons": (0,)},
