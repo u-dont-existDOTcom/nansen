@@ -420,7 +420,7 @@ def csv_text(rows: tuple[dict[str, Any], ...], fieldnames: tuple[str, ...]) -> s
     )
     writer.writeheader()
     for row in rows:
-        writer.writerow({key: "" if row.get(key) is None else row.get(key) for key in fieldnames})
+        writer.writerow({key: "" if value is None else value for key, value in row.items()})
     return output.getvalue()
 
 
