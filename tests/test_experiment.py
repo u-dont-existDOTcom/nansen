@@ -596,6 +596,41 @@ def test_signal_manifest_rejects_source_outside_sibling_experiments_directory(tm
         experiment.load_signal_manifest(manifest)
 
 
+def test_signal_manifest_rejects_companion_file_symlink_to_external_bundle(tmp_path):
+    """Fails if a manifest symlink can replace the caller-visible experiments trust root."""
+    external_manifest, _ = write_signal_bundle(tmp_path / "external")
+    trusted_experiments = tmp_path / "trusted" / "research" / "experiments"
+    trusted_bundle = trusted_experiments / "signal-shadow"
+    trusted_bundle.mkdir(parents=True)
+    linked_manifest = trusted_bundle / "manifest.json"
+    linked_manifest.symlink_to(external_manifest)
+
+    with pytest.raises(
+        ExperimentError,
+        match="companion manifest must be a direct bundle under trusted experiments root",
+    ) as error:
+        experiment.load_signal_manifest(linked_manifest)
+
+    assert str(trusted_experiments.resolve()) in str(error.value)
+
+
+def test_signal_manifest_rejects_companion_directory_symlink_to_external_bundle(tmp_path):
+    """Fails if a bundle-directory symlink can replace the trusted experiments parent."""
+    external_manifest, _ = write_signal_bundle(tmp_path / "external")
+    trusted_experiments = tmp_path / "trusted" / "research" / "experiments"
+    trusted_experiments.mkdir(parents=True)
+    linked_bundle = trusted_experiments / "signal-shadow"
+    linked_bundle.symlink_to(external_manifest.parent, target_is_directory=True)
+
+    with pytest.raises(
+        ExperimentError,
+        match="companion manifest must be a direct bundle under trusted experiments root",
+    ) as error:
+        experiment.load_signal_manifest(linked_bundle / "manifest.json")
+
+    assert str(trusted_experiments.resolve()) in str(error.value)
+
+
 def test_signal_manifest_rejects_source_hash_mismatch(tmp_path):
     """Fails if a companion can silently bind to source-manifest byte drift."""
     manifest, _ = write_signal_bundle(tmp_path)
