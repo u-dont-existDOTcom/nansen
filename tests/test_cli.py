@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -176,6 +177,30 @@ def test_who_bought_sold_normalizes_timezone_aware_timestamps_to_utc(tmp_path, m
     args.func(args)
 
 
+def test_who_bought_sold_normalizes_labels_before_archiving_payload(tmp_path, monkeypatch):
+    """Fails if cosmetic label whitespace produces a different archived API request."""
+    class FakeNansenClient:
+        def post_with_provenance(self, endpoint, payload, *, refresh=False):
+            assert payload["filters"]["include_smart_money_labels"] == [
+                "Fund", "Smart Trader",
+            ]
+            return SimpleNamespace(
+                body={"data": [], "pagination": {"is_last_page": True}},
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:01:00Z",
+            )
+
+    monkeypatch.setattr(cli, "NansenClient", FakeNansenClient)
+    monkeypatch.chdir(tmp_path)
+    args = cli.build_parser().parse_args([
+        "who-bought-sold", "--chain", "base", "--token", "0xtoken", "--side", "BUY",
+        "--from", "2026-08-01T00:00:00Z", "--to", "2026-08-02T00:00:00Z",
+        "--labels", " Fund ", "Smart Trader ",
+    ])
+
+    args.func(args)
+
+
 def test_who_bought_sold_rejects_fractional_start_after_end_before_client_construction(
     monkeypatch
 ):
@@ -202,8 +227,11 @@ def test_who_bought_sold_rejects_fractional_start_after_end_before_client_constr
         (["--limit", "0"], "between 1 and 100"),
         (["--limit", "101"], "between 1 and 100"),
         (["--min-volume-usd", "-0.1"], "non-negative"),
+        (["--min-volume-usd", "nan"], "finite"),
+        (["--min-volume-usd", "inf"], "finite"),
         (["--labels", ""], "empty"),
         (["--labels", "Fund", "Fund"], "duplicates"),
+        (["--labels", "Fund", " Fund "], "duplicates"),
     ],
 )
 def test_who_bought_sold_rejects_invalid_arguments_before_client_construction(
@@ -300,3 +328,78 @@ def test_write_api_artifacts_shallow_copies_response_metadata(tmp_path):
         "row_count": 1,
         "pagination_complete": True,
     }
+
+
+@pytest.mark.parametrize("existing_pair", [False, True])
+def test_write_api_artifacts_rolls_back_pair_when_sidecar_install_fails(
+    tmp_path, monkeypatch, existing_pair
+):
+    """Fails if a sidecar-install failure leaves an unpaired or stale response artifact."""
+    output = tmp_path / "evidence.json"
+    request = tmp_path / "evidence.request.json"
+    if existing_pair:
+        output.write_bytes(b"old response\n")
+        request.write_bytes(b"old sidecar\n")
+    original_files = {path.name: path.read_bytes() for path in tmp_path.iterdir()}
+
+    def fail_sidecar_install(temporary, target):
+        if target == request:
+            raise OSError("injected sidecar install failure")
+        temporary.replace(target)
+
+    monkeypatch.setattr(cli, "_install_artifact", fail_sidecar_install, raising=False)
+
+    with pytest.raises(OSError, match="injected sidecar install failure"):
+        cli.write_api_artifacts(
+            body={"data": ["new"]},
+            payload={"page": 1},
+            endpoint="tgm/who-bought-sold",
+            output_path=output,
+            cache_hit=False,
+            response_retrieved_at="2026-08-02T00:01:00Z",
+            artifact_written_at="2026-08-02T00:02:00Z",
+        )
+
+    assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == original_files
+
+
+def test_write_api_artifacts_pair_lock_blocks_second_writer_before_targets_change(tmp_path):
+    """Fails if a concurrent writer can enter a response/sidecar pair commit without its lock."""
+    output = tmp_path / "evidence.json"
+    request = tmp_path / "evidence.request.json"
+    output.write_bytes(b"old response\n")
+    request.write_bytes(b"old sidecar\n")
+    started = threading.Event()
+    finished = threading.Event()
+    failures = []
+
+    def second_writer():
+        try:
+            started.set()
+            cli.write_api_artifacts(
+                body={"data": ["new"]},
+                payload={"page": 1},
+                endpoint="tgm/who-bought-sold",
+                output_path=output,
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:01:00Z",
+                artifact_written_at="2026-08-02T00:02:00Z",
+            )
+        except BaseException as exc:  # Assert thread failures on the test thread.
+            failures.append(exc)
+        finally:
+            finished.set()
+
+    with cli._artifact_pair_lock(output):
+        worker = threading.Thread(target=second_writer)
+        worker.start()
+        assert started.wait(timeout=1)
+        assert not finished.wait(timeout=0.1)
+        assert output.read_bytes() == b"old response\n"
+        assert request.read_bytes() == b"old sidecar\n"
+
+    assert finished.wait(timeout=10)
+    worker.join()
+    assert not failures
+    assert json.loads(output.read_text()) == {"data": ["new"]}
+    assert not list(tmp_path.glob(".*"))

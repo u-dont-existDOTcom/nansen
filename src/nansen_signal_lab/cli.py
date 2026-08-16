@@ -3,8 +3,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import tempfile
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -91,10 +94,18 @@ def _flow_artifact_paths(output_path):
 
 
 def _write_sibling_temporary(path, content):
+    return _write_sibling_staged(path, content, suffix=".tmp")
+
+
+def _write_sibling_backup(path, content):
+    return _write_sibling_staged(path, content, suffix=".bak")
+
+
+def _write_sibling_staged(path, content, *, suffix):
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent,
         prefix=f".{path.name}.",
-        suffix=".tmp",
+        suffix=suffix,
     )
     temporary = Path(temporary_name)
     try:
@@ -106,6 +117,27 @@ def _write_sibling_temporary(path, content):
         temporary.unlink(missing_ok=True)
         raise
     return temporary
+
+
+@contextmanager
+def _artifact_pair_lock(output_path):
+    response_path, _ = _flow_artifact_paths(output_path)
+    response_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = response_path.with_name(f".{response_path.name}.pair.lock")
+    while True:
+        try:
+            lock_path.mkdir()
+            break
+        except FileExistsError:
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        lock_path.rmdir()
+
+
+def _install_artifact(temporary, target):
+    temporary.replace(target)
 
 
 def write_api_artifacts(
@@ -122,10 +154,6 @@ def write_api_artifacts(
 ):
     response_path, request_path = _flow_artifact_paths(output_path)
     response_path.parent.mkdir(parents=True, exist_ok=True)
-    if not overwrite and (response_path.exists() or request_path.exists()):
-        raise FileExistsError(
-            f"refusing to overwrite explicit flow output: {response_path} or {request_path}"
-        )
     response_bytes = (json.dumps(body, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     metadata = {
         "schema_version": 2,
@@ -142,24 +170,47 @@ def write_api_artifacts(
     request_bytes = (
         json.dumps(metadata, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
     ).encode("utf-8")
-    response_temporary = None
-    request_temporary = None
-    try:
-        response_temporary = _write_sibling_temporary(response_path, response_bytes)
-        request_temporary = _write_sibling_temporary(request_path, request_bytes)
-        if not overwrite and (response_path.exists() or request_path.exists()):
-            raise FileExistsError(
-                f"refusing to overwrite explicit flow output: {response_path} or {request_path}"
-            )
-        response_temporary.replace(response_path)
+    with _artifact_pair_lock(response_path):
         response_temporary = None
-        request_temporary.replace(request_path)
         request_temporary = None
-    finally:
-        if response_temporary is not None:
-            response_temporary.unlink(missing_ok=True)
-        if request_temporary is not None:
-            request_temporary.unlink(missing_ok=True)
+        backups = {}
+        installation_started = False
+        try:
+            if not overwrite and (response_path.exists() or request_path.exists()):
+                raise FileExistsError(
+                    f"refusing to overwrite explicit flow output: {response_path} or {request_path}"
+                )
+            original_bytes = {
+                response_path: response_path.read_bytes() if response_path.exists() else None,
+                request_path: request_path.read_bytes() if request_path.exists() else None,
+            }
+            response_temporary = _write_sibling_temporary(response_path, response_bytes)
+            request_temporary = _write_sibling_temporary(request_path, request_bytes)
+            backups = {
+                path: _write_sibling_backup(path, original)
+                for path, original in original_bytes.items()
+                if original is not None
+            }
+            installation_started = True
+            _install_artifact(response_temporary, response_path)
+            response_temporary = None
+            _install_artifact(request_temporary, request_path)
+            request_temporary = None
+        except BaseException:
+            if installation_started:
+                for path, original in original_bytes.items():
+                    if original is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        backups.pop(path).replace(path)
+            raise
+        finally:
+            if response_temporary is not None:
+                response_temporary.unlink(missing_ok=True)
+            if request_temporary is not None:
+                request_temporary.unlink(missing_ok=True)
+            for backup in backups.values():
+                backup.unlink(missing_ok=True)
     return response_path, request_path
 
 
@@ -239,15 +290,18 @@ def _parse_utc_timestamp(value):
 def cmd_who_bought_sold(args):
     start = _parse_utc_timestamp(args.from_)
     end = _parse_utc_timestamp(args.to)
+    labels = [label.strip() for label in args.labels]
     if start >= end:
         raise ValueError("--from must be before --to")
     if not 1 <= args.limit <= 100:
         raise ValueError("--limit must be between 1 and 100")
+    if not math.isfinite(args.min_volume_usd):
+        raise ValueError("--min-volume-usd must be finite")
     if args.min_volume_usd < 0:
         raise ValueError("--min-volume-usd must be non-negative")
-    if any(not label.strip() for label in args.labels):
+    if any(not label for label in labels):
         raise ValueError("--labels cannot contain empty values")
-    if len(set(args.labels)) != len(args.labels):
+    if len(set(labels)) != len(labels):
         raise ValueError("--labels cannot contain duplicates")
 
     safe = args.token[:12].replace("/", "_")
@@ -274,7 +328,7 @@ def cmd_who_bought_sold(args):
         },
         "pagination": {"page": 1, "per_page": args.limit},
         "filters": {
-            "include_smart_money_labels": args.labels,
+            "include_smart_money_labels": labels,
             "trade_volume_usd": {"min": args.min_volume_usd},
         },
         "order_by": [{
