@@ -40,7 +40,7 @@ fi
 # GitHub's Contents API does not preserve executable bits, so make local launchers executable.
 chmod +x bootstrap.sh nansen-lab
 
-.venv/bin/pytest -q
+.venv/bin/python -m pytest -q
 
 echo
 echo "Running one cached/cheap Nansen Token Screener smoke call..."
