@@ -6,7 +6,147 @@ from pathlib import Path
 
 import pytest
 
-from src.nansen_signal_lab.experiment import ExperimentError, load_and_validate_manifest
+from src.nansen_signal_lab.experiment import (
+    ExperimentError,
+    build_analysis,
+    build_event_windows,
+    build_hourly_features,
+    build_token_summary,
+    load_and_validate_manifest,
+    prepare_flow_rows,
+)
+
+
+def flow_row(hour, price, holdings, *, complete=True, holders=2):
+    return {
+        "date": f"2026-08-01T{hour:02d}:00:00Z",
+        "bucket_end": f"2026-08-01T{hour + 1:02d}:00:00Z",
+        "is_complete": complete,
+        "price_usd": price,
+        "token_amount": holdings,
+        "value_usd": price * holdings,
+        "holders_count": holders,
+        "total_inflows_count": 0,
+        "total_outflows_count": 0,
+    }
+
+
+def fixture_member():
+    return {
+        "chain": "base",
+        "symbol": "FIX",
+        "address": "0xfixture",
+        "role": "early",
+        "selection": {},
+    }
+
+
+def test_prepare_rows_excludes_incomplete_and_counts_it():
+    """Fails if incomplete source rows enter a valid feature series."""
+    body = {"data": [flow_row(0, 10, 100), flow_row(1, 11, 110, complete=False)]}
+    prepared = prepare_flow_rows(body)
+    assert len(prepared.rows) == 1
+    assert prepared.incomplete_count == 1
+
+
+def test_prepare_rows_rejects_duplicate_timestamp():
+    """Fails if two source observations can share the same analysis timestamp."""
+    body = {"data": [flow_row(0, 10, 100), flow_row(0, 11, 110)]}
+    with pytest.raises(ExperimentError, match="duplicate timestamp"):
+        prepare_flow_rows(body)
+
+
+def test_prepare_rows_excludes_missing_or_zero_metrics_and_counts_them():
+    """Fails if rows lacking usable price or holdings contaminate calculations."""
+    missing_price = flow_row(1, 10, 100)
+    missing_price["price_usd"] = None
+    zero_price = flow_row(2, 0, 100)
+    missing_holdings = flow_row(3, 10, 100)
+    del missing_holdings["token_amount"]
+    prepared = prepare_flow_rows({"data": [
+        flow_row(0, 10, 100), missing_price, zero_price, missing_holdings,
+    ]})
+    assert len(prepared.rows) == 1
+    assert prepared.invalid_metric_count == 3
+
+
+def test_feature_and_event_windows_do_not_cross_gap_or_future():
+    """Fails if returns bridge a missing hour or label an immature horizon available."""
+    body = {"data": [
+        flow_row(0, 10, 100),
+        flow_row(1, 11, 110),
+        flow_row(2, 12, 120),
+        flow_row(4, 15, 130),
+    ]}
+    prepared = prepare_flow_rows(body)
+    features = build_hourly_features(
+        experiment_id="fixture",
+        cohort_member=fixture_member(),
+        prepared=prepared,
+        horizons=(1, 2),
+    )
+    assert features[1]["trailing_price_return_1h_pct"] == pytest.approx(10.0)
+    assert features[-1]["trailing_price_return_2h_pct"] is None
+    events = build_event_windows(features, horizons=(1, 2))
+    event_at_hour_1 = next(row for row in events if row["timestamp"] == "2026-08-01T01:00:00Z")
+    assert event_at_hour_1["forward_price_return_1h_pct"] == pytest.approx(100 * (12 / 11 - 1))
+    assert event_at_hour_1["forward_price_return_2h_pct"] is None
+    assert event_at_hour_1["forward_2h_available"] is False
+
+
+def test_mfe_and_mae_use_only_prices_inside_mature_horizon():
+    """Fails if excursions include a price outside a mature forward window."""
+    body = {"data": [
+        flow_row(0, 10, 100),
+        flow_row(1, 9, 110),
+        flow_row(2, 12, 110),
+        flow_row(3, 8, 110),
+    ]}
+    prepared = prepare_flow_rows(body)
+    features = build_hourly_features(
+        experiment_id="fixture",
+        cohort_member=fixture_member(),
+        prepared=prepared,
+        horizons=(2,),
+    )
+    event = build_event_windows(features, horizons=(2,))[0]
+    assert event["mfe_2h_pct"] == pytest.approx(100 * (12 / 9 - 1))
+    assert event["mae_2h_pct"] == pytest.approx(100 * (8 / 9 - 1))
+
+
+def test_token_summary_weights_only_mature_accumulation_events():
+    """Fails if an unavailable forward label contributes to weighted accumulation return."""
+    prepared = prepare_flow_rows({"data": [
+        flow_row(0, 10, 100),
+        flow_row(1, 11, 110),
+        flow_row(2, 12, 120),
+    ]})
+    features = build_hourly_features(
+        experiment_id="fixture", cohort_member=fixture_member(), prepared=prepared, horizons=(1,),
+    )
+    events = build_event_windows(features, horizons=(1,))
+    summary = build_token_summary(features, events, prepared, horizons=(1,))
+    assert summary["gross_accumulation_tokens"] == 20.0
+    assert summary["accumulation_event_count"] == 2
+    assert summary["accumulation_weighted_forward_1h_pct"] == pytest.approx(100 * (12 / 11 - 1))
+
+
+def test_build_analysis_uses_referenced_flow_evidence(tmp_path):
+    """Fails if bundle analysis ignores the cohort member's referenced flow evidence."""
+    manifest = write_bundle(tmp_path)
+    raw_path = tmp_path / "raw" / "flows.json"
+    raw_path.write_text(json.dumps({"data": [flow_row(0, 10, 100), flow_row(1, 11, 110)]}))
+    data = json.loads(manifest.read_text())
+    data["horizons_hours"] = [1]
+    data["evidence"][0]["sha256"] = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+    manifest.write_text(json.dumps(data))
+
+    tables = build_analysis(load_and_validate_manifest(manifest))
+
+    assert [row["timestamp"] for row in tables.hourly_features] == [
+        "2026-08-01T00:00:00Z", "2026-08-01T01:00:00Z",
+    ]
+    assert tables.token_summary[0]["price_return_all_pct"] == pytest.approx(10.0)
 
 
 def write_bundle(tmp_path: Path) -> Path:
