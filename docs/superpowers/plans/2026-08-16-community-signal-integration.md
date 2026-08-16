@@ -60,7 +60,7 @@ assert row["accumulation_persistence_2h"] == 1.0
 assert row["distribution_persistence_2h"] == 0.0
 assert row["holdings_velocity_2h_pct_per_hour"] == pytest.approx(10.0)
 assert row["holdings_acceleration_2h_pct_per_hour"] == pytest.approx(
-    10.0 - ((125 / 115 - 1) * 100 / 2)
+    10.0 - ((125 / 120 - 1) * 100 / 2)
 )
 assert row["holder_count_change_2h"] == 2
 assert row["accumulation_retention_2h"] == 1.0
@@ -178,7 +178,7 @@ git commit -m "Add trailing community signal features"
 - Modify: `tests/test_experiment.py` only where an existing writer test moves to the new generic interface.
 
 **Interfaces:**
-- Produces: `write_api_artifacts(*, body, payload, endpoint, output_path, cache_hit, response_retrieved_at, artifact_written_at, overwrite=True) -> tuple[Path, Path]`.
+- Produces: `write_api_artifacts(*, body, payload, endpoint, output_path, cache_hit, response_retrieved_at, artifact_written_at, response_metadata=None, overwrite=True) -> tuple[Path, Path]`.
 - Preserves: `write_flow_artifacts(...)` as a compatibility wrapper passing `endpoint="tgm/flows"`.
 - Extends: `flows --label {smart_money,exchange}`, default `smart_money`.
 - Adds: `who-bought-sold --chain CHAIN --token ADDRESS --side {BUY,SELL} --from ISO --to ISO [--labels ...] [--min-volume-usd N] [--limit N] [--output PATH] [--force-output] [--refresh]`.
@@ -301,7 +301,17 @@ Add a test that copies the committed v1 bundle to a temporary directory, runs `a
 ("hourly-features.csv", "event-windows.csv", "token-summary.csv")
 ```
 
-Also capture and assert the committed SHA-256 of each derived file using literal hashes measured before implementation. This catches accidental column or renderer changes.
+Also assert these committed SHA-256 values measured before implementation:
+
+```python
+{
+    "hourly-features.csv": "236802e99c79d7a75870b31b2578567bf186a6792939ccedade980af3d0e4061",
+    "event-windows.csv": "3e1066ee3e2ddfc333c8c39347518cd7a86a17fba45ebe6631944dc8b23e838e",
+    "token-summary.csv": "65d73fd8890b7b9f8162006568d4ad99579b4a4596d7869bb39475c691492ce7",
+}
+```
+
+This catches accidental column or renderer changes.
 
 Run the test before production edits. It should pass as a characterization baseline; then temporarily monkeypatch the expected filename list or renderer to prove the assertion fails, restore it, and record the red-green proof in the task report.
 
