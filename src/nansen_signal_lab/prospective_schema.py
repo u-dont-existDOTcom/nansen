@@ -327,6 +327,39 @@ def _validate_artifact(
 ) -> str:
     if not path.is_file():
         raise ProspectiveError(f"sealed artifact is missing: {path}")
+    is_raw_model_response = (
+        path.parent.parent.name == "model"
+        and path.name.startswith("attempt-")
+        and path.name.endswith("-response.json")
+    )
+    metadata_path = path.with_name(
+        path.name.removesuffix("-response.json") + "-response-metadata.json"
+    )
+    if is_raw_model_response and metadata_path.is_file() and not metadata_path.is_symlink():
+        raw = path.read_bytes()
+        metadata = _read_json(
+            metadata_path,
+            label="OpenAI raw response metadata",
+            canonical=True,
+        )
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("schema_version") != 1
+            or metadata.get("response_file") != path.name
+            or metadata.get("response_sha256") != _sha256_bytes(raw)
+            or not isinstance(metadata.get("response_retrieved_at"), str)
+            or not isinstance(metadata.get("artifact_written_at"), str)
+        ):
+            raise ProspectiveError("OpenAI raw response metadata is invalid")
+        for field, timestamp in _timestamp_values(
+            metadata,
+            location=metadata_path.as_posix(),
+        ):
+            if timestamp > seal_time:
+                raise ProspectiveError(
+                    f"seal recorded_at precedes referenced {field} timestamp in {metadata_path}"
+                )
+        return _sha256_bytes(raw)
     if path.suffix == ".json":
         document = _read_json(path, label="sealed JSON artifact")
         if require_written_at and (

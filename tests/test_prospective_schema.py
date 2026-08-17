@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,40 @@ def _sha256(path: Path) -> str:
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(canonical_json_bytes(value))
+
+
+def test_raw_openai_response_is_hash_validated_through_companion_metadata(tmp_path):
+    response = tmp_path / "model/pass-1/attempt-1-response.json"
+    response.parent.mkdir(parents=True)
+    response.write_bytes(b"provider error is not JSON")
+    metadata = response.with_name("attempt-1-response-metadata.json")
+    _write_json(metadata, {
+        "schema_version": 1,
+        "attempt": 1,
+        "status_code": 503,
+        "request_started_at": "2026-08-17T10:00:00Z",
+        "response_retrieved_at": "2026-08-17T10:00:01Z",
+        "artifact_written_at": "2026-08-17T10:00:02Z",
+        "response_headers": {},
+        "response_id": None,
+        "returned_model_id": None,
+        "usage": {},
+        "response_file": response.name,
+        "response_sha256": _sha256(response),
+    })
+    assert prospective_schema._validate_artifact(
+        response,
+        seal_time=datetime(2026, 8, 17, 10, 1, tzinfo=timezone.utc),
+        require_written_at=True,
+    ) == _sha256(response)
+
+    metadata.unlink()
+    with pytest.raises(ProspectiveError, match="sealed JSON"):
+        prospective_schema._validate_artifact(
+            response,
+            seal_time=datetime(2026, 8, 17, 10, 1, tzinfo=timezone.utc),
+            require_written_at=True,
+        )
 
 
 def _repo_fixture(tmp_path: Path) -> Path:
