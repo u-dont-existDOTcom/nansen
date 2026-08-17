@@ -287,6 +287,15 @@ def test_load_evaluation_manifest_requires_numeric_ordered_predicates(tmp_path, 
         load_evaluation_manifest(path)
 
 
+def test_load_evaluation_manifest_accepts_huge_integer_ordered_predicate(tmp_path):
+    """Fails if finite integer thresholds are unnecessarily converted to float."""
+    path, manifest = _bundle(tmp_path)
+    huge = 10**400
+    manifest["theories"][0]["all"][0].update({"operator": "gt", "value": huge})
+    _write(path, manifest)
+    assert load_evaluation_manifest(path).theories[0].predicates[0].value == huge
+
+
 @pytest.mark.parametrize(
     ("role", "objective"),
     [
@@ -531,6 +540,18 @@ def test_ordered_predicates_require_nonboolean_numeric_operands(operator, value,
         current={"timestamp": "2026-08-01T01:00:00Z"},
         by_timestamp={timestamp: {"holdings_acceleration_4h_pct_per_hour": actual}},
     ) is expected
+
+
+def test_ordered_predicate_matches_huge_integers_without_float_overflow():
+    """Fails if runtime ordered matching converts finite integers to float."""
+    timestamp = _utc("2026-08-01T01:00:00Z")
+    huge = 10**400
+    predicate = Predicate("holdings_acceleration_4h_pct_per_hour", "gt", huge, 0)
+    assert predicate_matches(
+        predicate,
+        current={"timestamp": "2026-08-01T01:00:00Z"},
+        by_timestamp={timestamp: {"holdings_acceleration_4h_pct_per_hour": huge + 1}},
+    )
 
 
 def test_build_theory_events_enters_next_hour_and_exits_after_fixed_horizon():

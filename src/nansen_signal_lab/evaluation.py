@@ -198,6 +198,14 @@ def _scalar(value: Any) -> bool:
     return value is None or isinstance(value, (str, int, float, bool))
 
 
+def _finite_nonboolean_number(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return True
+    return isinstance(value, float) and math.isfinite(value)
+
+
 def _validate_predicate(record: Any, allowed_features: set[str], *, context: str) -> Predicate:
     _keys(record, _PREDICATE_KEYS, label="predicate", context=context)
     feature = _nonempty_string(record["feature"], field="predicate feature", context=context)
@@ -208,9 +216,7 @@ def _validate_predicate(record: Any, allowed_features: set[str], *, context: str
         raise EvaluationError(f"invalid predicate operator: {operator}{context}")
     value = record["value"]
     if operator in {"gt", "gte", "lt", "lte"} and (
-        isinstance(value, bool)
-        or not isinstance(value, (int, float))
-        or not math.isfinite(float(value))
+        not _finite_nonboolean_number(value)
     ):
         raise EvaluationError(
             f"ordered predicate value must be a finite non-boolean numeric scalar{context}"
@@ -221,11 +227,7 @@ def _validate_predicate(record: Any, allowed_features: set[str], *, context: str
             raise EvaluationError(f"predicate in value must be a non-empty unique scalar list{context}")
         for item in values:
             if isinstance(item, (int, float)) and not isinstance(item, bool):
-                try:
-                    finite = math.isfinite(float(item))
-                except (OverflowError, ValueError):
-                    finite = False
-                if not finite:
+                if not _finite_nonboolean_number(item):
                     raise EvaluationError(f"predicate value must be finite{context}")
         try:
             unique = len(values) == len(set(values))
@@ -237,11 +239,7 @@ def _validate_predicate(record: Any, allowed_features: set[str], *, context: str
     elif not _scalar(value):
         raise EvaluationError(f"predicate value must be scalar{context}")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        try:
-            finite = math.isfinite(float(value))
-        except (OverflowError, ValueError):
-            finite = False
-        if not finite:
+        if not _finite_nonboolean_number(value):
             raise EvaluationError(f"predicate value must be finite{context}")
     lag_hours = _strict_nonnegative_int(record["lag_hours"], field="predicate lag_hours", context=context)
     return Predicate(feature=feature, operator=operator, value=value, lag_hours=lag_hours)
@@ -540,14 +538,6 @@ def _compatible_scalar_kinds(left: Any, right: Any) -> bool:
 
 def _scalar_equals(left: Any, right: Any) -> bool:
     return _compatible_scalar_kinds(left, right) and bool(left == right)
-
-
-def _finite_nonboolean_number(value: Any) -> bool:
-    return (
-        not isinstance(value, bool)
-        and isinstance(value, (int, float))
-        and math.isfinite(float(value))
-    )
 
 
 def predicate_matches(
