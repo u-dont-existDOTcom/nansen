@@ -277,6 +277,16 @@ def test_load_evaluation_manifest_rejects_invalid_predicate_lag_and_operator(tmp
         load_evaluation_manifest(path)
 
 
+@pytest.mark.parametrize("value", [True, "positive", float("nan"), float("inf")])
+def test_load_evaluation_manifest_requires_numeric_ordered_predicates(tmp_path, value):
+    """Fails if an ordered predicate can compare categorical or non-finite values."""
+    path, manifest = _bundle(tmp_path)
+    manifest["theories"][0]["all"][0].update({"operator": "gt", "value": value})
+    _write(path, manifest)
+    with pytest.raises(EvaluationError, match="ordered predicate value"):
+        load_evaluation_manifest(path)
+
+
 @pytest.mark.parametrize(
     ("role", "objective"),
     [
@@ -494,6 +504,26 @@ def test_predicate_matches_rejects_unavailable_value():
 )
 def test_predicate_matches_keeps_boolean_and_numeric_scalars_disjoint(operator, value, actual, expected):
     """Fails if Python bool-as-int equality lets a boolean bypass a numeric predicate."""
+    timestamp = _utc("2026-08-01T01:00:00Z")
+    predicate = Predicate("holdings_acceleration_4h_pct_per_hour", operator, value, 0)
+    assert predicate_matches(
+        predicate,
+        current={"timestamp": "2026-08-01T01:00:00Z"},
+        by_timestamp={timestamp: {"holdings_acceleration_4h_pct_per_hour": actual}},
+    ) is expected
+
+
+@pytest.mark.parametrize(
+    ("operator", "value", "actual", "expected"),
+    [
+        ("gt", False, True, False),
+        ("lt", "z", "a", False),
+        ("gte", 1.0, 1, True),
+        ("lt", 2.0, 1, True),
+    ],
+)
+def test_ordered_predicates_require_nonboolean_numeric_operands(operator, value, actual, expected):
+    """Fails if ordered predicates use Python boolean or lexical ordering."""
     timestamp = _utc("2026-08-01T01:00:00Z")
     predicate = Predicate("holdings_acceleration_4h_pct_per_hour", operator, value, 0)
     assert predicate_matches(

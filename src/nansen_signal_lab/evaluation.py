@@ -207,6 +207,14 @@ def _validate_predicate(record: Any, allowed_features: set[str], *, context: str
     if operator not in _OPERATORS:
         raise EvaluationError(f"invalid predicate operator: {operator}{context}")
     value = record["value"]
+    if operator in {"gt", "gte", "lt", "lte"} and (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise EvaluationError(
+            f"ordered predicate value must be a finite non-boolean numeric scalar{context}"
+        )
     if operator == "in":
         values = value
         if not isinstance(values, list) or not values or any(not _scalar(item) for item in values):
@@ -534,6 +542,14 @@ def _scalar_equals(left: Any, right: Any) -> bool:
     return _compatible_scalar_kinds(left, right) and bool(left == right)
 
 
+def _finite_nonboolean_number(value: Any) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(float(value))
+    )
+
+
 def predicate_matches(
     predicate: Predicate,
     *,
@@ -549,6 +565,11 @@ def predicate_matches(
         return _scalar_equals(actual, predicate.value)
     if predicate.operator == "in":
         return any(_scalar_equals(actual, candidate) for candidate in predicate.value)
+    if not (
+        _finite_nonboolean_number(actual)
+        and _finite_nonboolean_number(predicate.value)
+    ):
+        return False
     if not _compatible_scalar_kinds(actual, predicate.value):
         return False
     operations = {
