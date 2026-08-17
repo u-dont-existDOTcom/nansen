@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -41,6 +42,9 @@ _SCREENER_PAYLOAD = {
     "order_by": [{"field": "netflow", "direction": "DESC"}],
 }
 _NOTIONAL_FORMULA = "min(1000, 0.001 * liquidity_usd)"
+_RFC_3339_TIMESTAMP = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 _FLOW_FIELDS = (
     "date", "bucket_end", "price_usd", "token_amount", "value_usd", "holders_count",
     "total_inflows", "total_outflows", "total_inflows_count", "total_outflows_count",
@@ -62,7 +66,7 @@ def _utc(value: datetime, *, field: str) -> datetime:
 
 
 def _timestamp(value: Any, *, field: str) -> datetime:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or _RFC_3339_TIMESTAMP.fullmatch(value) is None:
         raise SnapshotError(f"{field} must be an RFC 3339 timestamp")
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -195,6 +199,15 @@ def freeze_selection(
     """Freeze selection identity, source liquidity, and virtual notional separately."""
     if not isinstance(candidate.row, dict):
         raise SnapshotError("selected screener row must be an object")
+    row_chain = candidate.row.get("chain")
+    row_address = _row_field(candidate.row, "token_address", "address")
+    row_symbol = _row_field(candidate.row, "symbol", "token_symbol")
+    if (
+        _address_identity(row_chain, row_address)
+        != _address_identity(candidate.chain, candidate.token_address)
+        or row_symbol != candidate.token_symbol
+    ):
+        raise SnapshotError("selected screener row identity does not match candidate")
     if (
         not isinstance(screener_response_sha256, str)
         or len(screener_response_sha256) != 64

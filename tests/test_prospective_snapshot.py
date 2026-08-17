@@ -142,11 +142,25 @@ def test_freeze_uses_only_screener_liquidity_and_binds_hashes():
     }
 
     capped = snapshot.freeze_selection(
-        snapshot.Candidate("base", "0xDef", "CAP", 1, _candidate_row(liquidity=2_000_000)),
+        snapshot.Candidate("base", "0xDef", "CAP", 1, _candidate_row(
+            address="0xDef", symbol="CAP", liquidity=2_000_000,
+        )),
         screener_response_sha256="b" * 64,
         screener_retrieved_at="2026-08-17T10:00:00Z",
     )
     assert capped["notional"]["virtual_notional_usd"] == 1_000.0
+
+
+def test_freeze_rejects_a_screener_row_for_a_different_candidate_identity():
+    snapshot = _snapshot_module()
+    with pytest.raises(snapshot.SnapshotError, match="identity"):
+        snapshot.freeze_selection(
+            snapshot.Candidate("solana", "So111", "SOL", 250_000, _candidate_row(
+                chain="solana", address="so111", symbol="SOL",
+            )),
+            screener_response_sha256="d" * 64,
+            screener_retrieved_at="2026-08-17T10:00:00Z",
+        )
 
 
 def test_predecision_requests_are_exact_relative_contract_triples():
@@ -228,7 +242,9 @@ def _final_flow_body(rows, *, is_last_page: object = True):
 
 def _selection(snapshot):
     return snapshot.freeze_selection(
-        snapshot.Candidate("solana", "So111", "LEAK", 250_000, _candidate_row(chain="solana", address="So111")),
+        snapshot.Candidate("solana", "So111", "LEAK", 250_000, _candidate_row(
+            chain="solana", address="So111", symbol="LEAK",
+        )),
         screener_response_sha256="c" * 64,
         screener_retrieved_at="2026-08-17T10:00:00Z",
     )
@@ -250,6 +266,18 @@ def test_normalization_rejects_incomplete_late_or_nonfinal_flow_evidence():
                 _final_flow_body(rows, is_last_page=final), _final_flow_body(valid),
                 available_at=available_at,
             )
+
+
+def test_normalization_rejects_space_separated_bucket_end_timestamp():
+    snapshot = _snapshot_module()
+    available_at = datetime(2026, 8, 17, 10, tzinfo=timezone.utc)
+    rows = [_flow_row(hour) for hour in range(13)]
+    rows[-1]["bucket_end"] = "2026-08-17 10:00:00+00:00"
+    with pytest.raises(snapshot.SnapshotError, match="RFC 3339"):
+        snapshot.normalize_snapshot(
+            _selection(snapshot), {"data": {}}, {"data": {}},
+            _final_flow_body(rows), _final_flow_body(rows), available_at=available_at,
+        )
 
 
 def test_normalization_preserves_gap_as_unavailable_and_ignores_token_info_liquidity():
