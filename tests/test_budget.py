@@ -7,8 +7,17 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import src.nansen_signal_lab.budget as budget_module
-from src.nansen_signal_lab.artifacts import canonical_json_bytes, write_json_once
-from src.nansen_signal_lab.budget import BudgetCorruption, BudgetError, BudgetGuard
+from src.nansen_signal_lab.artifacts import (
+    canonical_json_bytes,
+    write_bytes_once,
+    write_json_once,
+)
+from src.nansen_signal_lab.budget import (
+    BudgetCorruption,
+    BudgetError,
+    BudgetGuard,
+    canonical_request_sha256,
+)
 from src.nansen_signal_lab.client import NansenEvidenceResponse, NansenRequestFailure
 
 
@@ -20,6 +29,7 @@ def evidence(
     remaining: int | None = 9,
     errors: tuple[str, ...] = (),
     retrieved_at: str = "2026-08-17T10:00:00Z",
+    retry_after: str | None = "30",
 ) -> NansenEvidenceResponse:
     raw = b'{"data":[]}'
     headers = {}
@@ -30,8 +40,8 @@ def evidence(
     ):
         if value is not None:
             headers[name] = str(value)
-    if status == 429:
-        headers["Retry-After"] = "30"
+    if status == 429 and retry_after is not None:
+        headers["Retry-After"] = retry_after
     return NansenEvidenceResponse(
         body={"data": []},
         body_parse_status="json_object",
@@ -52,16 +62,29 @@ def request_hash(index: int) -> str:
     return hashlib.sha256(f"request-{index}".encode()).hexdigest()
 
 
-def artifact_hash(index: int) -> str:
-    return hashlib.sha256(f"artifact-{index}".encode()).hexdigest()
+def response_artifact(
+    guard: BudgetGuard,
+    reservation,
+    response: NansenEvidenceResponse,
+) -> str:
+    path = (
+        guard.root
+        / "raw"
+        / "nansen"
+        / reservation.reservation_id
+        / f"attempt-{reservation.attempt_count}-response.json"
+    )
+    write_bytes_once(path, response.raw_body)
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def establish_account_baseline(guard: BudgetGuard, remaining: int = 10) -> None:
     reservation = guard.reserve("account", request_hash(0), "account", 1)
+    response = evidence(cost=0, used=0, remaining=remaining)
     guard.confirm(
         reservation,
-        evidence(cost=0, used=0, remaining=remaining),
-        response_artifact_sha256=artifact_hash(0),
+        response,
+        response_artifact_sha256=response_artifact(guard, reservation, response),
     )
 
 
@@ -100,26 +123,29 @@ def test_confirmed_zero_releases_and_positive_use_consumes_exact_totals(tmp_path
     assert (guard.replay().calls, guard.replay().credits) == (0, 0)
 
     reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
+    response = evidence(cost=1, used=1, remaining=9)
+    response_sha256 = response_artifact(guard, reservation, response)
     guard.confirm(
         reservation,
-        evidence(cost=1, used=1, remaining=9),
-        response_artifact_sha256=artifact_hash(1),
+        response,
+        response_artifact_sha256=response_sha256,
     )
 
     totals = guard.replay()
     assert (totals.calls, totals.credits, totals.provider_remaining) == (1, 1, 9)
     assert totals.entries[-1].state == "confirmed_used"
-    assert totals.entries[-1].response_artifact_sha256 == artifact_hash(1)
+    assert totals.entries[-1].response_artifact_sha256 == response_sha256
 
 
 def test_confirmed_billable_zero_releases_both_totals(tmp_path):
     guard = BudgetGuard(tmp_path)
     establish_account_baseline(guard)
     reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
+    response = evidence(cost=1, used=0, remaining=10)
     guard.confirm(
         reservation,
-        evidence(cost=1, used=0, remaining=10),
-        response_artifact_sha256=artifact_hash(1),
+        response,
+        response_artifact_sha256=response_artifact(guard, reservation, response),
     )
 
     assert (guard.replay().calls, guard.replay().credits) == (0, 0)
@@ -145,7 +171,11 @@ def test_fail_releases_zero_consumes_positive_and_conserves_ambiguous(tmp_path):
     zero_failure = NansenRequestFailure(
         "Nansen HTTP 429", transmitted=True, response=evidence(status=429, cost=1, used=0, remaining=10)
     )
-    zero_guard.fail(zero, zero_failure, failure_artifact_sha256=artifact_hash(1))
+    zero_guard.fail(
+        zero,
+        zero_failure,
+        failure_artifact_sha256=response_artifact(zero_guard, zero, zero_failure.response),
+    )
     assert (zero_guard.replay().calls, zero_guard.replay().credits) == (0, 0)
     assert zero_guard.replay().entries[0].state == "failed_before_pricing"
 
@@ -154,7 +184,11 @@ def test_fail_releases_zero_consumes_positive_and_conserves_ambiguous(tmp_path):
     used_failure = NansenRequestFailure(
         "Nansen HTTP 500", transmitted=True, response=evidence(status=500, cost=1, used=2, remaining=8)
     )
-    used_guard.fail(used, used_failure, failure_artifact_sha256=artifact_hash(2))
+    used_guard.fail(
+        used,
+        used_failure,
+        failure_artifact_sha256=response_artifact(used_guard, used, used_failure.response),
+    )
     assert (used_guard.replay().calls, used_guard.replay().credits) == (1, 2)
     assert used_guard.replay().entries[0].state == "confirmed_used"
 
@@ -180,10 +214,11 @@ def test_retryable_zero_is_persisted_once_and_deadline_is_enforced(tmp_path):
         response=evidence(status=429, cost=1, used=0, remaining=10),
     )
     deadline = datetime(2026, 8, 17, 10, 0, 30, tzinfo=timezone.utc)
+    failure_sha256 = response_artifact(guard, reservation, failure.response)
     guard.mark_retryable_zero(
         reservation,
         failure,
-        failure_artifact_sha256=artifact_hash(1),
+        failure_artifact_sha256=failure_sha256,
         retry_not_before=deadline,
     )
 
@@ -218,20 +253,178 @@ def test_retry_deadline_must_be_after_response_and_within_sixty_seconds(tmp_path
         transmitted=True,
         response=evidence(status=429, cost=1, used=0, remaining=10),
     )
+    failure_sha256 = response_artifact(guard, reservation, failure.response)
 
     with pytest.raises(BudgetError, match="retry deadline"):
         guard.mark_retryable_zero(
             reservation,
             failure,
-            failure_artifact_sha256=artifact_hash(1),
+            failure_artifact_sha256=failure_sha256,
             retry_not_before=datetime(2026, 8, 17, 10, 0, tzinfo=timezone.utc)
             + timedelta(seconds=seconds),
         )
 
 
-def test_reconcile_request_artifact_without_response_to_ambiguous(tmp_path):
+@pytest.mark.parametrize("retry_after", [None, "not-an-integer", "31", "-1", "61"])
+def test_retry_deadline_requires_matching_integer_retry_after(tmp_path, retry_after):
     guard = BudgetGuard(tmp_path)
     reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
+    response = evidence(
+        status=429,
+        cost=1,
+        used=0,
+        remaining=10,
+        retry_after=retry_after,
+    )
+    failure = NansenRequestFailure(
+        "Nansen HTTP 429", transmitted=True, response=response
+    )
+
+    with pytest.raises(BudgetError, match="Retry-After"):
+        guard.mark_retryable_zero(
+            reservation,
+            failure,
+            failure_artifact_sha256=response_artifact(
+                guard, reservation, response
+            ),
+            retry_not_before=datetime(
+                2026, 8, 17, 10, 0, 30, tzinfo=timezone.utc
+            ),
+        )
+
+
+def test_begin_retry_refuses_a_persistently_halted_ledger(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    retry = guard.reserve("retry", request_hash(1), "token-screener", 1)
+    doomed = guard.reserve("doomed", request_hash(2), "tgm/flows", 1)
+    response = evidence(status=429, cost=1, used=0, remaining=10)
+    failure = NansenRequestFailure(
+        "Nansen HTTP 429", transmitted=True, response=response
+    )
+    guard.mark_retryable_zero(
+        retry,
+        failure,
+        failure_artifact_sha256=response_artifact(guard, retry, response),
+        retry_not_before=datetime(2026, 8, 17, 10, 0, 30, tzinfo=timezone.utc),
+    )
+    persisted_retry = guard.replay().entries[0]
+    guard.fail(
+        doomed,
+        NansenRequestFailure("timeout", transmitted=True),
+        failure_artifact_sha256=None,
+    )
+
+    with pytest.raises(BudgetError, match="halted"):
+        guard.begin_retry(
+            persisted_retry,
+            now=datetime(2026, 8, 17, 10, 0, 30, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.parametrize("operation", ["confirm", "fail", "retryable_zero"])
+def test_received_response_settlement_rejects_a_missing_artifact(tmp_path, operation):
+    guard = BudgetGuard(tmp_path)
+    endpoint = "account" if operation == "confirm" else "token-screener"
+    reservation = guard.reserve("request", request_hash(1), endpoint, 1)
+    response = evidence(
+        status=429 if operation == "retryable_zero" else 500,
+        cost=0 if operation == "confirm" else 1,
+        used=0,
+        remaining=10,
+    )
+    missing_sha256 = hashlib.sha256(b"missing response artifact").hexdigest()
+
+    with pytest.raises(BudgetError, match="artifact"):
+        if operation == "confirm":
+            guard.confirm(
+                reservation,
+                response,
+                response_artifact_sha256=missing_sha256,
+            )
+        elif operation == "fail":
+            guard.fail(
+                reservation,
+                NansenRequestFailure(
+                    "Nansen HTTP 500", transmitted=True, response=response
+                ),
+                failure_artifact_sha256=missing_sha256,
+            )
+        else:
+            guard.mark_retryable_zero(
+                reservation,
+                NansenRequestFailure(
+                    "Nansen HTTP 429", transmitted=True, response=response
+                ),
+                failure_artifact_sha256=missing_sha256,
+                retry_not_before=datetime(
+                    2026, 8, 17, 10, 0, 30, tzinfo=timezone.utc
+                ),
+            )
+
+
+def test_confirm_rejects_a_response_artifact_hash_mismatch(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    reservation = guard.reserve("account", request_hash(1), "account", 1)
+    response = evidence(cost=0, used=0, remaining=10)
+    path = (
+        tmp_path
+        / "raw"
+        / "nansen"
+        / reservation.reservation_id
+        / "attempt-1-response.json"
+    )
+    write_bytes_once(path, b"wrong installed bytes")
+
+    with pytest.raises(BudgetError, match="artifact"):
+        guard.confirm(
+            reservation,
+            response,
+            response_artifact_sha256=hashlib.sha256(response.raw_body).hexdigest(),
+        )
+
+
+@pytest.mark.parametrize("defect", ["fabricated_identity", "extra_key", "noncanonical"])
+def test_bind_request_artifact_requires_exact_canonical_identity(tmp_path, defect):
+    guard = BudgetGuard(tmp_path)
+    method = "POST"
+    endpoint = "token-screener"
+    payload = {"chains": ["base"]}
+    identity_sha256 = canonical_request_sha256(method, endpoint, payload)
+    reservation_sha256 = request_hash(9) if defect == "fabricated_identity" else identity_sha256
+    reservation = guard.reserve("screen", reservation_sha256, endpoint, 1)
+    document = {
+        "method": method,
+        "endpoint": endpoint,
+        "payload": payload,
+        "request_sha256": reservation_sha256,
+        "caller_request_id": "screen",
+        "request_started_at": "2026-08-17T10:00:00Z",
+        "transmission_may_begin": True,
+    }
+    if defect == "extra_key":
+        document["unsealed"] = True
+    content = canonical_json_bytes(document)
+    if defect == "noncanonical":
+        content = (json.dumps(document, indent=2) + "\n").encode()
+    path = (
+        tmp_path
+        / "raw"
+        / "nansen"
+        / reservation.reservation_id
+        / "attempt-1-request.json"
+    )
+    write_bytes_once(path, content)
+
+    with pytest.raises(BudgetError, match="request artifact"):
+        guard.bind_request_artifact(
+            reservation, hashlib.sha256(path.read_bytes()).hexdigest()
+        )
+
+
+def test_reconcile_request_artifact_without_response_to_ambiguous(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    identity_sha256 = canonical_request_sha256("POST", "token-screener", {})
+    reservation = guard.reserve("screen", identity_sha256, "token-screener", 1)
     request_path = (
         tmp_path
         / "raw"
@@ -246,7 +439,7 @@ def test_reconcile_request_artifact_without_response_to_ambiguous(tmp_path):
             "method": "POST",
             "endpoint": "token-screener",
             "payload": {},
-            "request_sha256": request_hash(1),
+            "request_sha256": identity_sha256,
             "caller_request_id": "screen",
             "request_started_at": "2026-08-17T10:00:00Z",
             "transmission_may_begin": True,
@@ -317,10 +510,11 @@ def test_settlement_does_not_change_earlier_snapshot_bytes(tmp_path):
     snapshot = guard.snapshot("decision_sealed", recorded_at="2026-08-17T10:00:00Z")
     before = snapshot.read_bytes()
 
+    response = evidence(cost=1, used=1, remaining=9)
     guard.confirm(
         reservation,
-        evidence(cost=1, used=1, remaining=9),
-        response_artifact_sha256=artifact_hash(1),
+        response,
+        response_artifact_sha256=response_artifact(guard, reservation, response),
     )
 
     assert snapshot.read_bytes() == before
@@ -338,6 +532,8 @@ def test_crash_after_journal_install_rebuilds_head_without_duplicate_transition(
     if operation == "confirm":
         establish_account_baseline(guard)
         reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
+        response = evidence(cost=1, used=1, remaining=9)
+        response_sha256 = response_artifact(guard, reservation, response)
     operations_before = [
         json.loads(path.read_text())["operation"]
         for path in sorted((tmp_path / "budget" / "journal").glob("*.json"))
@@ -354,8 +550,8 @@ def test_crash_after_journal_install_rebuilds_head_without_duplicate_transition(
         else:
             guard.confirm(
                 reservation,
-                evidence(cost=1, used=1, remaining=9),
-                response_artifact_sha256=artifact_hash(1),
+                response,
+                response_artifact_sha256=response_sha256,
             )
     monkeypatch.setattr(budget_module, "atomic_replace_bytes", real_replace)
 
@@ -392,17 +588,18 @@ def test_pricing_drift_is_ledgered_with_evidence_and_halts_next_request(
     guard = BudgetGuard(tmp_path)
     establish_account_baseline(guard)
     reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
+    response_sha256 = response_artifact(guard, reservation, response)
 
     with pytest.raises(BudgetError, match="pricing"):
         guard.confirm(
             reservation,
             response,
-            response_artifact_sha256=artifact_hash(1),
+            response_artifact_sha256=response_sha256,
         )
 
     entry = guard.replay().entries[-1]
     assert entry.state == state
-    assert entry.response_artifact_sha256 == artifact_hash(1)
+    assert entry.response_artifact_sha256 == response_sha256
     with pytest.raises(BudgetError, match="halted"):
         guard.reserve("later", request_hash(2), "tgm/flows", 1)
 
@@ -414,18 +611,20 @@ def test_actual_used_credits_above_ceiling_are_persisted_then_halt(tmp_path):
     for index in range(1, 10):
         reservation = guard.reserve(f"call-{index}", request_hash(index), "tgm/flows", 1)
         remaining -= 1
+        response = evidence(cost=1, used=1, remaining=remaining)
         guard.confirm(
             reservation,
-            evidence(cost=1, used=1, remaining=remaining),
-            response_artifact_sha256=artifact_hash(index),
+            response,
+            response_artifact_sha256=response_artifact(guard, reservation, response),
         )
     final = guard.reserve("call-10", request_hash(10), "tgm/flows", 1)
+    response = evidence(cost=1, used=2, remaining=9)
 
     with pytest.raises(BudgetError, match="credit ceiling"):
         guard.confirm(
             final,
-            evidence(cost=1, used=2, remaining=9),
-            response_artifact_sha256=artifact_hash(10),
+            response,
+            response_artifact_sha256=response_artifact(guard, final, response),
         )
 
     assert guard.replay().credits == 11

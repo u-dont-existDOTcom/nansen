@@ -7,7 +7,7 @@ import os
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
@@ -75,6 +75,15 @@ _COUNTED_STATES = {"reserved", "retryable_zero", "confirmed_used", "ambiguous"}
 _STATES = _COUNTED_STATES | {"confirmed_zero", "failed_before_pricing"}
 _JOURNAL_PATTERN = re.compile(r"^(\d{6})-([0-9a-f]{64})\.json$")
 _HASH_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_REQUEST_ARTIFACT_KEYS = {
+    "method",
+    "endpoint",
+    "payload",
+    "request_sha256",
+    "caller_request_id",
+    "request_started_at",
+    "transmission_may_begin",
+}
 
 
 def _normalized_endpoint(endpoint: str) -> str:
@@ -567,23 +576,37 @@ class BudgetGuard:
     ) -> BudgetReservation:
         _require_hash(request_artifact_sha256, "request_artifact_sha256")
         path = self._artifact_path(reservation, "request")
-        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != request_artifact_sha256:
+        if not path.is_file():
+            raise BudgetError("request artifact is missing or does not match its SHA-256")
+        raw = path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != request_artifact_sha256:
             raise BudgetError("request artifact is missing or does not match its SHA-256")
         try:
-            document = json.loads(path.read_bytes())
+            document = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise BudgetError("request artifact is not JSON") from exc
         if (
             not isinstance(document, dict)
-            or document.get("request_sha256") != reservation.request_sha256
-            or document.get("endpoint") != reservation.endpoint
+            or set(document) != _REQUEST_ARTIFACT_KEYS
+            or canonical_json_bytes(document) != raw
+            or not isinstance(document["method"], str)
+            or document["method"] != document["method"].upper()
+            or not isinstance(document["endpoint"], str)
+            or _normalized_endpoint(document["endpoint"]) != document["endpoint"]
+            or not (isinstance(document["payload"], dict) or document["payload"] is None)
+            or document["request_sha256"]
+            != canonical_request_sha256(
+                document["method"], document["endpoint"], document["payload"]
+            )
+            or document["request_sha256"] != reservation.request_sha256
+            or document["endpoint"] != reservation.endpoint
             or document.get("transmission_may_begin") is not True
-            or not isinstance(document.get("method"), str)
-            or "payload" not in document
-            or not isinstance(document.get("caller_request_id"), str)
-            or not isinstance(document.get("request_started_at"), str)
+            or not isinstance(document["caller_request_id"], str)
+            or not document["caller_request_id"]
+            or not isinstance(document["request_started_at"], str)
         ):
             raise BudgetError("request artifact does not match the reservation")
+        _parse_time(document["request_started_at"], "request artifact start time")
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")
@@ -595,6 +618,19 @@ class BudgetGuard:
                 hashes,
                 provider_remaining,
                 halted_reason,
+            )
+
+    def _verify_response_artifact(
+        self, reservation: BudgetReservation, response_artifact_sha256: str
+    ) -> None:
+        path = self._artifact_path(reservation, "response")
+        if (
+            not path.is_file()
+            or hashlib.sha256(path.read_bytes()).hexdigest()
+            != response_artifact_sha256
+        ):
+            raise BudgetError(
+                "response artifact is missing or does not match its SHA-256"
             )
 
     def _settlement_entry(
@@ -625,6 +661,7 @@ class BudgetGuard:
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")
+            self._verify_response_artifact(current, response_artifact_sha256)
             incomplete = bool(response.credit_header_errors) or any(
                 value is None
                 for value in (response.credit_cost, response.credit_used, response.credit_remaining)
@@ -693,6 +730,9 @@ class BudgetGuard:
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")
             response = failure.response
+            if response is not None:
+                assert failure_artifact_sha256 is not None
+                self._verify_response_artifact(current, failure_artifact_sha256)
             if not failure.transmitted or (response is not None and response.credit_used == 0):
                 state = "failed_before_pricing"
             elif response is not None and response.credit_used is not None and response.credit_used > 0:
@@ -743,13 +783,23 @@ class BudgetGuard:
         ):
             raise BudgetError("only an explicit zero-use 429 is retryable")
         retrieved_at = _parse_time(response.response_retrieved_at, "response retrieval time")
+        retry_after = response.response_headers.get("Retry-After")
+        if (
+            retry_after is None
+            or not retry_after.isascii()
+            or not retry_after.isdigit()
+            or int(retry_after) > 60
+        ):
+            raise BudgetError("Retry-After must be an integer from 0 through 60")
         deadline = retry_not_before.astimezone(timezone.utc) if retry_not_before.tzinfo else None
-        if deadline is None or deadline < retrieved_at or (deadline - retrieved_at).total_seconds() > 60:
-            raise BudgetError("retry deadline must be within 0 through 60 seconds after response")
+        expected_deadline = retrieved_at + timedelta(seconds=int(retry_after))
+        if deadline is None or deadline != expected_deadline:
+            raise BudgetError("retry deadline must equal the Retry-After deadline")
         deadline_text = _utc_text(deadline)
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")
+            self._verify_response_artifact(current, failure_artifact_sha256)
             if current.attempt_count != 1:
                 raise BudgetError("a second retry is forbidden")
             updated = replace(
@@ -778,6 +828,8 @@ class BudgetGuard:
             raise BudgetError("retry clock must be timezone-aware")
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
+            if halted_reason is not None:
+                raise BudgetError(f"budget is halted: {halted_reason}")
             current = self._current(reservation, entries, "retryable_zero")
             if current.attempt_count != 1 or current.retry_not_before is None:
                 raise BudgetError("a second retry is forbidden")
