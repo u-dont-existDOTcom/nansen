@@ -67,6 +67,8 @@ The [`paper-strategy feasibility evaluation`](research/experiments/2026-08-17-pa
 
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.
 
+The [`prospective GPT pilot successor`](research/experiments/2026-08-17-gpt-prospective-pilot-successor/PREREGISTRATION.md) is a separately named schema-v4 observation created after the credential gate was corrected and fully reverified. It preserves the original model, thresholds, frozen comparators, paper-only execution, and ten-call/ten-credit ceiling; its committed preregistration begins with zero calls, zero credits, no selected token, no inference, and no outcome.
+
 ```bash
 ./nansen-lab pilot-replay --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
 ./nansen-lab pilot-check --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json

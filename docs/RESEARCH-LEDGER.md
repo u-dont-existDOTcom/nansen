@@ -58,3 +58,11 @@ This ledger is append-only: add new dated entries at the end; do not rewrite pri
 - **Accounting:** Zero Nansen calls and zero Nansen credits. No selected token, blinded snapshot, GPT output, comparator decision, paper fill, market outcome, or headline comparison exists.
 - **Audit disposition:** Unusable as a model or strategy observation. The client accepted a nonempty credential that did not have an OpenAI API-key shape instead of rejecting it locally, contrary to the preregistered credential gate. See the [terminal-audit erratum](audits/2026-08-17-gpt-prospective-pilot-erratum.md).
 - **Follow-up:** Fix and verify local credential-shape validation for future runs. Any actual GPT test must use a separately named, separately committed preregistration; the sealed terminal bundle is never rerun or rewritten.
+
+## 2026-08-17 — Preregistered GPT prospective pilot successor
+
+- **Bundle:** [`research/experiments/2026-08-17-gpt-prospective-pilot-successor/`](../research/experiments/2026-08-17-gpt-prospective-pilot-successor/) — new schema-v4 observation created only after the original terminal bundle was preserved and the credential-shape guard passed its full regression gate.
+- **Status:** Preregistered; zero Nansen calls, zero Nansen credits, no GPT inference, no selected token, no outcome, and no `REPORT.md`.
+- **Contract:** Unchanged from the original preregistration: exact `gpt-5.6-sol`, two identity-blinded no-tool passes, the same six hash-bound frozen records, page-local eligible selection, common observed fills, strict-greater-than scoring, and the ten-call/ten-credit ceiling.
+- **Independence:** This bundle has a distinct experiment ID and creation time. It does not overwrite, reopen, or reuse any request from the terminal HTTP-401 observation.
+- **Follow-up:** Run only from its committed preregistered state. Any transmitted failure remains terminal and is never rerolled.

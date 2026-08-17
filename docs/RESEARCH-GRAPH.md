@@ -85,7 +85,8 @@ flowchart LR
     next_gpt_prospective_outcome["Next observation: sealed decision then delayed paper settlement"]
     obs_gpt_preflight_401["Terminal observation: model-access preflight HTTP 401; zero Nansen calls/credits"]
     audit_gpt_pilot_invalidated["Audit: unusable; non-API credential should have failed local validation"]
-    next_gpt_successor_preregistration["Next test: separately preregistered successor after credential-gate fix"]
+    next_gpt_successor_preregistration["Experiment: separately preregistered GPT pilot successor"]
+    exp_20260817_gpt_prospective_pilot_successor["Experiment: 2026-08-17 GPT prospective pilot successor (preregistered)"]
 
     exp_20260817_paper_strategy_feasibility -->|freezes_six_records_for| exp_20260817_gpt_prospective_pilot
     protocol_identity_blinded_gpt -->|tested_by| exp_20260817_gpt_prospective_pilot
@@ -95,6 +96,9 @@ flowchart LR
     exp_20260817_gpt_prospective_pilot -->|terminated_before_snapshot| obs_gpt_preflight_401
     obs_gpt_preflight_401 -->|invalidated_for_model_comparison| audit_gpt_pilot_invalidated
     audit_gpt_pilot_invalidated -->|requires_new_preregistration| next_gpt_successor_preregistration
+    next_gpt_successor_preregistration -->|realized_as| exp_20260817_gpt_prospective_pilot_successor
+    exp_20260817_paper_strategy_feasibility -->|freezes_same_six_records_for| exp_20260817_gpt_prospective_pilot_successor
+    protocol_identity_blinded_gpt -->|tested_by| exp_20260817_gpt_prospective_pilot_successor
 ```
 
 Observation evidence:
@@ -111,5 +115,6 @@ Observation evidence:
 - [`obs_holder_breadth_advance`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md#decision) — descriptive H3 comparison result, not a selected entry strategy.
 - [`exp_20260817_gpt_prospective_pilot`](../research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) — terminal schema-v4 bundle; the model preflight returned HTTP 401 before selection or inference, with zero Nansen calls/credits.
 - [`audit_gpt_pilot_invalidated`](audits/2026-08-17-gpt-prospective-pilot-erratum.md) — the terminal event is unusable for model comparison because an invalid credential class should have failed local validation.
+- [`exp_20260817_gpt_prospective_pilot_successor`](../research/experiments/2026-08-17-gpt-prospective-pilot-successor/PREREGISTRATION.md) — distinct committed successor; no provider call, inference, selection, or outcome exists yet.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

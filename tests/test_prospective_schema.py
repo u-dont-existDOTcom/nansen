@@ -169,6 +169,25 @@ def test_committed_prospective_terminal_preflight_failure_is_valid_and_unscorabl
     assert budget["totals"] == {"calls": 0, "credits": 0}
 
 
+def test_committed_prospective_successor_is_preregistered_without_outcome():
+    manifest = (
+        Path(__file__).resolve().parents[1]
+        / "research/experiments/2026-08-17-gpt-prospective-pilot-successor/manifest.json"
+    )
+    bundle = load_prospective_manifest(manifest)
+
+    assert bundle.manifest["experiment_id"] == (
+        "2026-08-17-gpt-prospective-pilot-successor"
+    )
+    assert bundle.manifest["stage"] == "preregistered"
+    assert bundle.manifest["max_nansen_calls"] == 10
+    assert bundle.manifest["max_nansen_credits"] == 10
+    assert bundle.manifest["artifacts"] == []
+    assert bundle.manifest["seals"] == []
+    assert not (bundle.root / "REPORT.md").exists()
+    assert not (bundle.root / "seals/outcome.json").exists()
+
+
 def _repo_fixture(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     experiments = repo / "research/experiments"
