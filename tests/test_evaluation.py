@@ -26,8 +26,10 @@ from src.nansen_signal_lab.evaluation import (
     build_theory_events,
     build_theory_summaries,
     entry_objective_pct,
+    evaluate_manifest,
     load_evaluation_manifest,
     predicate_matches,
+    render_evaluation_outputs,
     veto_objective_pct,
 )
 
@@ -1136,3 +1138,60 @@ def test_build_evaluation_runs_the_real_frozen_lineage_offline(tmp_path):
     assert tables.summaries == build_theory_summaries(tables.events, bundle)
     assert tables.comparisons == ()
     assert tables.paper_selection["mode"] == "paper_only"
+
+
+def test_render_evaluation_outputs_has_stable_public_contract(tmp_path):
+    """Fails if a public output header, JSON format, or output name drifts."""
+    path, _ = _bundle(tmp_path)
+    bundle = load_evaluation_manifest(path)
+
+    rendered = render_evaluation_outputs(bundle, build_evaluation(bundle))
+
+    assert tuple(rendered) == (
+        "theory-events.csv",
+        "theory-summary.csv",
+        "paper-strategies.json",
+    )
+    assert rendered["theory-events.csv"].decode().splitlines()[0].split(",") == [
+        "evaluation_id", "theory_id", "theory_role", "block_id", "chain", "symbol",
+        "token_address", "signal_timestamp", "entry_timestamp", "exit_timestamp",
+        "holding_period_hours", "gross_return_pct", "gross_objective_pct",
+        "base_objective_pct", "stress_objective_pct",
+    ]
+    assert rendered["theory-summary.csv"].decode().splitlines()[0].split(",") == [
+        "evaluation_id", "theory_id", "theory_role", "block_id", "event_count",
+        "token_count", "event_mean_gross_objective_pct", "event_median_gross_objective_pct",
+        "event_mean_base_objective_pct", "event_median_base_objective_pct",
+        "event_mean_stress_objective_pct", "event_median_stress_objective_pct",
+        "event_win_rate_base", "token_equal_mean_gross_objective_pct",
+        "token_equal_mean_base_objective_pct", "token_equal_mean_stress_objective_pct",
+        "max_token_positive_pnl_contribution", "gate_status", "gate_reason_codes",
+    ]
+    paper = rendered["paper-strategies.json"].decode()
+    assert paper.endswith("\n")
+    assert paper == json.dumps(json.loads(paper), indent=2, sort_keys=True) + "\n"
+
+
+def test_evaluate_manifest_writes_reproducibly_and_check_detects_one_byte_drift(tmp_path):
+    """Fails if a derived output is not reproducible or check ignores byte drift."""
+    path, _ = _bundle(tmp_path)
+
+    paths = evaluate_manifest(path)
+    first = {item.name: item.read_bytes() for item in paths}
+    assert evaluate_manifest(path) == paths
+    assert {item.name: item.read_bytes() for item in paths} == first
+    assert evaluate_manifest(path, check=True) == paths
+
+    paths[0].write_bytes(first[paths[0].name][:-1] + b"x")
+    with pytest.raises(EvaluationError, match="derived output differs"):
+        evaluate_manifest(path, check=True)
+
+
+def test_evaluate_manifest_check_never_creates_derived_outputs(tmp_path):
+    """Fails if verification can create a derived directory or an output file."""
+    path, _ = _bundle(tmp_path)
+
+    with pytest.raises(EvaluationError, match="derived output differs"):
+        evaluate_manifest(path, check=True)
+
+    assert not (path.parent / "derived").exists()

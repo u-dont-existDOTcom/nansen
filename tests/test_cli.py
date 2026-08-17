@@ -854,3 +854,26 @@ def test_write_api_artifacts_serializes_overwrite_refusal_between_real_writers(
     assert json.loads(output.read_text()) == {"data": ["A"]}
     assert json.loads(request.read_text())["payload"] == {"writer": "A"}
     assert not list(tmp_path.glob(".*"))
+
+
+def test_evaluate_command_is_offline_and_reports_verified_outputs(tmp_path, monkeypatch, capsys):
+    """Fails if the offline evaluator constructs an API client or hides checked files."""
+    from test_evaluation import _bundle
+    from src.nansen_signal_lab.evaluation import evaluate_manifest
+
+    manifest, _ = _bundle(tmp_path)
+    evaluate_manifest(manifest)
+
+    class ClientMustNotBeConstructed:
+        def __init__(self):
+            raise AssertionError("offline evaluator constructed NansenClient")
+
+    monkeypatch.setattr(cli, "NansenClient", ClientMustNotBeConstructed)
+    args = cli.build_parser().parse_args([
+        "evaluate", "--manifest", str(manifest), "--check",
+    ])
+    args.func(args)
+
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 3
+    assert all(line.startswith("verified: ") for line in lines)

@@ -14,6 +14,7 @@ import pandas as pd
 from dotenv import load_dotenv
 
 from .client import NansenClient
+from .evaluation import evaluate_manifest
 from .experiment import analyze_manifest
 from .metrics import accumulation_class, flow_market_cap_ratio
 
@@ -629,6 +630,13 @@ def cmd_analyze(args):
         print(f"{prefix}{path}")
 
 
+def cmd_evaluate(args):
+    paths = evaluate_manifest(args.manifest, check=args.check)
+    prefix = "verified: " if args.check else ""
+    for path in paths:
+        print(f"{prefix}{path}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="nansen-lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -681,12 +689,18 @@ def build_parser():
     s.add_argument("--manifest", required=True)
     s.add_argument("--check", action="store_true")
     s.set_defaults(func=cmd_analyze)
+
+    s = sub.add_parser("evaluate", help="evaluate fixed paper-only strategy theories offline")
+    s.add_argument("--manifest", required=True)
+    s.add_argument("--check", action="store_true")
+    s.set_defaults(func=cmd_evaluate)
     return p
 
 
 def main():
-    load_dotenv()
     args = build_parser().parse_args()
+    if args.cmd != "evaluate":
+        load_dotenv()
     args.func(args)
 
 

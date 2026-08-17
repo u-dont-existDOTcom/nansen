@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import copy
+import csv
 import json
 import math
 import os
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +93,24 @@ class EvaluationTables:
     summaries: tuple[dict[str, Any], ...]
     comparisons: tuple[dict[str, Any], ...]
     paper_selection: dict[str, Any]
+
+
+EVENT_FIELDS = (
+    "evaluation_id", "theory_id", "theory_role", "block_id", "chain", "symbol",
+    "token_address", "signal_timestamp", "entry_timestamp", "exit_timestamp",
+    "holding_period_hours", "gross_return_pct", "gross_objective_pct",
+    "base_objective_pct", "stress_objective_pct",
+)
+
+SUMMARY_FIELDS = (
+    "evaluation_id", "theory_id", "theory_role", "block_id", "event_count",
+    "token_count", "event_mean_gross_objective_pct", "event_median_gross_objective_pct",
+    "event_mean_base_objective_pct", "event_median_base_objective_pct",
+    "event_mean_stress_objective_pct", "event_median_stress_objective_pct",
+    "event_win_rate_base", "token_equal_mean_gross_objective_pct",
+    "token_equal_mean_base_objective_pct", "token_equal_mean_stress_objective_pct",
+    "max_token_positive_pnl_contribution", "gate_status", "gate_reason_codes",
+)
 
 
 _TOP_LEVEL_KEYS = {
@@ -1133,3 +1153,70 @@ def build_evaluation(bundle: EvaluationBundle) -> EvaluationTables:
     comparisons = build_comparison_results(summaries, bundle.comparisons)
     paper_selection = build_paper_selection(bundle, summaries, comparisons)
     return EvaluationTables(events, summaries, comparisons, paper_selection)
+
+
+def _csv_bytes(
+    rows: tuple[dict[str, Any], ...], fieldnames: tuple[str, ...]
+) -> bytes:
+    output = StringIO(newline="")
+    writer = csv.DictWriter(
+        output,
+        fieldnames=fieldnames,
+        lineterminator="\n",
+        extrasaction="raise",
+    )
+    writer.writeheader()
+    for row in sorted(rows, key=lambda item: tuple(str(item.get(field, "")) for field in fieldnames)):
+        writer.writerow({field: "" if row.get(field) is None else row.get(field) for field in fieldnames})
+    return output.getvalue().encode("utf-8")
+
+
+def render_evaluation_outputs(
+    bundle: EvaluationBundle,
+    tables: EvaluationTables,
+) -> dict[str, bytes]:
+    """Render the complete, reproducible offline evaluator output set."""
+    return {
+        "theory-events.csv": _csv_bytes(tables.events, EVENT_FIELDS),
+        "theory-summary.csv": _csv_bytes(tables.summaries, SUMMARY_FIELDS),
+        "paper-strategies.json": (
+            json.dumps(tables.paper_selection, indent=2, sort_keys=True, allow_nan=False)
+            + "\n"
+        ).encode("utf-8"),
+    }
+
+
+def evaluate_manifest(
+    manifest_path: str | Path,
+    *,
+    check: bool = False,
+) -> tuple[Path, ...]:
+    """Build or verify reproducible strategy-discovery outputs without API access."""
+    bundle = load_evaluation_manifest(manifest_path)
+    rendered = render_evaluation_outputs(bundle, build_evaluation(bundle))
+    derived = bundle.root / "derived"
+    paths = tuple(derived / name for name in rendered)
+    if check:
+        for path in paths:
+            if not path.is_file() or path.read_bytes() != rendered[path.name]:
+                raise EvaluationError(f"derived output differs: {path}")
+        return paths
+
+    derived.mkdir(parents=True, exist_ok=True)
+    for path in paths:
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        try:
+            with temporary.open("wb") as output:
+                output.write(rendered[path.name])
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+    descriptor = os.open(derived, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    return paths
