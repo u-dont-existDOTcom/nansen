@@ -592,6 +592,50 @@ def test_recovery_rejects_changed_orphan_seal(tmp_path, monkeypatch):
         recover_stage_transaction(bundle)
 
 
+@pytest.mark.parametrize("symlink_kind", ["seal", "ancestor"])
+def test_recovery_rejects_exact_orphan_seal_symlink_without_mutating_state(
+    tmp_path, monkeypatch, symlink_kind
+):
+    bundle = _bundle(tmp_path)
+    artifact, snapshot, recorded_at = _stage_files(bundle, "snapshot_collected", 1)
+    original_replace = prospective_schema.atomic_replace_bytes
+    calls = 0
+
+    def crash_after_seal(path, content):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected after seal")
+        return original_replace(path, content)
+
+    monkeypatch.setattr(prospective_schema, "atomic_replace_bytes", crash_after_seal)
+    with pytest.raises(OSError, match="injected after seal"):
+        commit_stage(
+            bundle, "snapshot_collected", recorded_at, (artifact,), snapshot
+        )
+    monkeypatch.setattr(prospective_schema, "atomic_replace_bytes", original_replace)
+
+    manifest_before = bundle.manifest_path.read_bytes()
+    marker = bundle.root / ".transactions/stage.json"
+    seal = bundle.root / "seals/snapshot.json"
+    if symlink_kind == "seal":
+        external_seal = tmp_path / "exact-snapshot-seal.json"
+        shutil.copy2(seal, external_seal)
+        seal.unlink()
+        seal.symlink_to(external_seal)
+    else:
+        external_seals = tmp_path / "external-seals"
+        seal.parent.rename(external_seals)
+        seal.parent.symlink_to(external_seals, target_is_directory=True)
+
+    with pytest.raises(ProspectiveError, match="symlink"):
+        recover_stage_transaction(bundle)
+    assert (bundle.manifest_path.read_bytes(), marker.is_file()) == (
+        manifest_before,
+        True,
+    )
+
+
 def test_recovery_rejects_changed_prior_seal_before_installing_new_seal(
     tmp_path, monkeypatch
 ):

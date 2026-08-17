@@ -959,7 +959,11 @@ def recover_stage_transaction(bundle: ProspectiveBundle) -> ProspectiveBundle:
             raise ProspectiveError("stage transaction experiment identity is corrupt")
         manifest_raw = bundle.manifest_path.read_bytes()
         manifest_hash = _sha256_bytes(manifest_raw)
-        seal_path = root / marker["seal_path"]
+        _, seal_path = _bundle_ref(
+            root,
+            marker["seal_path"],
+            label="stage transaction seal path",
+        )
         seal_exists = seal_path.exists() or seal_path.is_symlink()
         seal_exact = seal_path.is_file() and _sha256_file(seal_path) == marker["seal_sha256"]
         is_prior = manifest_hash == marker["prior_manifest_sha256"]
@@ -987,5 +991,6 @@ def recover_stage_transaction(bundle: ProspectiveBundle) -> ProspectiveBundle:
             if seal_exists and not seal_exact:
                 raise ProspectiveError("stage transaction seal checksum is corrupt")
             raise ProspectiveError("stage transaction state is corrupt or changed")
+        recovered = load_prospective_manifest(bundle.manifest_path)
         _remove_transaction_marker(marker_path)
-        return load_prospective_manifest(bundle.manifest_path)
+        return recovered
