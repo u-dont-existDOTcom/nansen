@@ -4,14 +4,23 @@ import copy
 import hashlib
 import json
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 from src.nansen_signal_lab.evaluation import (
     BlockedTheorySpec,
+    CostScenario,
     EvaluationError,
+    Predicate,
+    TheorySpec,
+    TimeBlock,
+    build_theory_events,
+    entry_objective_pct,
     load_evaluation_manifest,
+    predicate_matches,
+    veto_objective_pct,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -266,3 +275,256 @@ def test_load_evaluation_manifest_rejects_invalid_predicate_lag_and_operator(tmp
     _write(path, manifest)
     with pytest.raises(EvaluationError, match="lag_hours"):
         load_evaluation_manifest(path)
+
+
+def _utc(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _timestamp(hour: int) -> str:
+    return (datetime(2026, 8, 1, tzinfo=timezone.utc) + timedelta(hours=hour)).isoformat().replace("+00:00", "Z")
+
+
+def _entry_theory(*, holding_period_hours: int = 4) -> TheorySpec:
+    return TheorySpec(
+        id="entry-v1",
+        role="entry",
+        objective="positive_return",
+        holding_period_hours=holding_period_hours,
+        predicates=(Predicate("market_phase_4h", "eq", "markup", 0),),
+    )
+
+
+def _veto_theory() -> TheorySpec:
+    return TheorySpec(
+        id="veto-v1",
+        role="veto",
+        objective="avoided_loss",
+        holding_period_hours=4,
+        predicates=(Predicate("market_phase_4h", "eq", "distribution_divergence", 0),),
+    )
+
+
+def _literal_signal_rows(*, second_token: bool = False) -> tuple[dict, ...]:
+    rows = tuple(
+        {
+            "chain": "base",
+            "symbol": "X",
+            "token_address": "0xtoken",
+            "timestamp": _timestamp(hour),
+            "market_phase_4h": "markup",
+        }
+        for hour in range(9)
+    )
+    if not second_token:
+        return rows
+    return rows + ({
+        "chain": "base",
+        "symbol": "Y",
+        "token_address": "0xother",
+        "timestamp": _timestamp(1),
+        "market_phase_4h": "markup",
+    },)
+
+
+def _literal_source_rows(*, prices: dict[int, float] | None = None, second_token: bool = False) -> tuple[dict, ...]:
+    prices = prices or {}
+    rows = tuple(
+        {
+            "chain": "base",
+            "symbol": "X",
+            "address": "0xtoken",
+            "timestamp": _timestamp(hour),
+            "price_usd": prices.get(hour, 100.0),
+        }
+        for hour in range(9)
+    )
+    if not second_token:
+        return rows
+    return rows + tuple({
+        "chain": "base",
+        "symbol": "Y",
+        "address": "0xother",
+        "timestamp": _timestamp(hour),
+        "price_usd": 100.0,
+    } for hour in range(9))
+
+
+_COSTS = (CostScenario("base", 100), CostScenario("stress", 250))
+_WINDOW_START = _utc("2026-08-01T00:00:00Z")
+_WINDOW_END = _utc("2026-08-02T00:00:00Z")
+_BLOCK = TimeBlock("b", _WINDOW_START, _WINDOW_END)
+
+
+def _events(signal_rows, source_rows, theories):
+    return build_theory_events(
+        signal_rows=signal_rows,
+        source_rows=source_rows,
+        theories=theories,
+        evaluation_id="e",
+        evaluation_start=_WINDOW_START,
+        evaluation_end=_WINDOW_END,
+        blocks=(_BLOCK,),
+        entry_lag_hours=1,
+        costs=_COSTS,
+    )
+
+
+def test_entry_objective_applies_two_multiplicative_sides():
+    """Fails if entry and exit costs are added rather than compounded."""
+    assert entry_objective_pct(10.0, 100) == pytest.approx(7.811)
+
+
+def test_veto_objective_subtracts_exit_and_reentry_costs():
+    """Fails if a veto omits either simulated exit or re-entry cost."""
+    assert veto_objective_pct(-5.0, 100) == pytest.approx(3.0)
+
+
+def test_exact_lag_predicate_rejects_missing_prior_hour():
+    """Fails if absent exact-lag rows are treated as matching history."""
+    predicate = Predicate("holdings_acceleration_4h_pct_per_hour", "lte", 0, 1)
+    assert predicate_matches(
+        predicate,
+        current={"timestamp": "2026-08-01T02:00:00Z"},
+        by_timestamp={},
+    ) is False
+
+
+@pytest.mark.parametrize(
+    ("operator", "value", "actual", "expected"),
+    [
+        ("eq", 2, 2, True),
+        ("in", (1, 2), 2, True),
+        ("gt", 2, 3, True),
+        ("gte", 2, 2, True),
+        ("lt", 3, 2, True),
+        ("lte", 2, 2, True),
+        ("gt", 3, 2, False),
+    ],
+)
+def test_predicate_matches_all_manifest_operators(operator, value, actual, expected):
+    """Fails if a permitted manifest operator is applied with reversed semantics."""
+    timestamp = _utc("2026-08-01T01:00:00Z")
+    predicate = Predicate("holdings_acceleration_4h_pct_per_hour", operator, value, 0)
+    assert predicate_matches(
+        predicate,
+        current={"timestamp": "2026-08-01T01:00:00Z"},
+        by_timestamp={timestamp: {"holdings_acceleration_4h_pct_per_hour": actual}},
+    ) is expected
+
+
+def test_predicate_matches_rejects_unavailable_value():
+    """Fails if unavailable trailing features become an implicit match."""
+    timestamp = _utc("2026-08-01T01:00:00Z")
+    predicate = Predicate("holdings_acceleration_4h_pct_per_hour", "gt", 0, 0)
+    assert not predicate_matches(
+        predicate,
+        current={"timestamp": "2026-08-01T01:00:00Z"},
+        by_timestamp={timestamp: {"holdings_acceleration_4h_pct_per_hour": None}},
+    )
+
+
+def test_build_theory_events_enters_next_hour_and_exits_after_fixed_horizon():
+    """Fails if an event uses the signal-hour price or an off-by-one fixed exit."""
+    events = _events(
+        (next(row for row in _literal_signal_rows() if row["timestamp"] == _timestamp(1)),),
+        _literal_source_rows(prices={2: 100.0, 6: 110.0}),
+        (_entry_theory(),),
+    )
+    assert events == ({
+        "evaluation_id": "e",
+        "theory_id": "entry-v1",
+        "theory_role": "entry",
+        "block_id": "b",
+        "chain": "base",
+        "symbol": "X",
+        "token_address": "0xtoken",
+        "signal_timestamp": "2026-08-01T01:00:00Z",
+        "entry_timestamp": "2026-08-01T02:00:00Z",
+        "exit_timestamp": "2026-08-01T06:00:00Z",
+        "holding_period_hours": 4,
+        "gross_return_pct": 10.0,
+        "gross_objective_pct": 10.0,
+        "base_objective_pct": pytest.approx(7.811),
+        "stress_objective_pct": pytest.approx(4.56875),
+    },)
+
+
+def test_build_theory_events_preserves_signal_only_predicates_despite_label_poison():
+    """Fails if an outcome-side label field is read to choose an event."""
+    signals = list(_literal_signal_rows())
+    signals[0]["forward_price_return_4h_pct"] = {"poison": "outcome-side"}
+    assert _events(tuple(signals), _literal_source_rows(), (_entry_theory(),))
+
+
+@pytest.mark.parametrize(
+    "source_rows",
+    [
+        tuple(row for row in _literal_source_rows() if row["timestamp"] != _timestamp(1)),
+        tuple(row for row in _literal_source_rows() if row["timestamp"] != _timestamp(5)),
+        _literal_source_rows(prices={1: 0.0}),
+        _literal_source_rows(prices={5: float("inf")}),
+    ],
+)
+def test_build_theory_events_skips_missing_or_unexecutable_prices(source_rows):
+    """Fails if missing, zero, or non-finite exact execution prices create an episode."""
+    signals = (next(row for row in _literal_signal_rows() if row["timestamp"] == _timestamp(0)),)
+    assert _events(signals, source_rows, (_entry_theory(),)) == ()
+
+
+def test_build_theory_events_excludes_window_outside_and_censored_signals():
+    """Fails if signals at the end boundary or after a censored exit are retained."""
+    signals = (
+        {**_literal_signal_rows()[0], "timestamp": _timestamp(24)},
+        {**_literal_signal_rows()[0], "timestamp": _timestamp(23)},
+    )
+    source_rows = _literal_source_rows() + (
+        {"chain": "base", "symbol": "X", "address": "0xtoken", "timestamp": _timestamp(24), "price_usd": 100.0},
+        {"chain": "base", "symbol": "X", "address": "0xtoken", "timestamp": _timestamp(28), "price_usd": 110.0},
+    )
+    assert _events(signals, source_rows, (_entry_theory(),)) == ()
+
+
+def test_build_theory_events_uses_exact_block_and_deterministic_theory_token_order():
+    """Fails if block assignment is boundary-inclusive at the end or output order is input order."""
+    first = TimeBlock("first", _WINDOW_START, _utc("2026-08-01T01:00:00Z"))
+    second = TimeBlock("second", _utc("2026-08-01T01:00:00Z"), _WINDOW_END)
+    events = build_theory_events(
+        signal_rows=tuple(reversed(_literal_signal_rows(second_token=True))),
+        source_rows=_literal_source_rows(second_token=True),
+        theories=(TheorySpec("z", "entry", "positive_return", 4, _entry_theory().predicates), TheorySpec("a", "entry", "positive_return", 4, _entry_theory().predicates)),
+        evaluation_id="e",
+        evaluation_start=_WINDOW_START,
+        evaluation_end=_WINDOW_END,
+        blocks=(first, second),
+        entry_lag_hours=1,
+        costs=_COSTS,
+    )
+    assert [(event["theory_id"], event["token_address"], event["block_id"]) for event in events[:4]] == [
+        ("a", "0xtoken", "first"),
+        ("a", "0xother", "second"),
+        ("z", "0xtoken", "first"),
+        ("z", "0xother", "second"),
+    ]
+
+
+def test_build_theory_events_uses_veto_objective_and_per_theory_token_cooldown():
+    """Fails if overlapping same-token signals survive or vetoes use long-return objective."""
+    signals = tuple(row for row in _literal_signal_rows(second_token=True) if row["timestamp"] in {_timestamp(0), _timestamp(1)})
+    signals = tuple(
+        {**row, "market_phase_4h": "distribution_divergence"}
+        if row["token_address"] == "0xtoken" else row
+        for row in signals
+    )
+    events = _events(
+        signals,
+        _literal_source_rows(prices={1: 100, 5: 95}, second_token=True),
+        (_veto_theory(), _entry_theory()),
+    )
+    veto = [event for event in events if event["theory_id"] == "veto-v1"]
+    entry = [event for event in events if event["theory_id"] == "entry-v1"]
+    assert len(veto) == 1
+    assert veto[0]["gross_return_pct"] == pytest.approx(-5.0)
+    assert veto[0]["gross_objective_pct"] == pytest.approx(5.0)
+    assert veto[0]["base_objective_pct"] == pytest.approx(3.0)
+    assert [event["token_address"] for event in entry] == ["0xother"]

@@ -4,7 +4,7 @@ import json
 import math
 import os
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -431,3 +431,197 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         comparisons=tuple(comparisons),
         blocked_theories=tuple(blocked),
     )
+
+
+def _parse_utc(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("timestamp must be timezone-aware")
+        return value.astimezone(timezone.utc)
+    if not isinstance(value, str):
+        raise ValueError("timestamp must be a string")
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("timestamp must be timezone-aware")
+    return parsed.astimezone(timezone.utc)
+
+
+def _normalized_identity(chain: Any, address: Any) -> tuple[str, str]:
+    normalized_chain = str(chain)
+    normalized_address = str(address)
+    if normalized_address.lower().startswith("0x"):
+        normalized_address = normalized_address.lower()
+    return normalized_chain, normalized_address
+
+
+def _timestamp_text(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _signal_sort_key(row: dict[str, Any]) -> tuple[datetime, str, str, str]:
+    timestamp = _parse_utc(row["timestamp"])
+    chain, address = _normalized_identity(row["chain"], row["token_address"])
+    return timestamp, chain, address, str(row.get("symbol", ""))
+
+
+def _positive_finite_price(row: dict[str, Any]) -> float | None:
+    value = row.get("price_usd")
+    if isinstance(value, bool):
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(price) or price <= 0:
+        return None
+    return price
+
+
+def entry_objective_pct(gross_return_pct: float, per_side_bps: float) -> float:
+    ratio = 1 + gross_return_pct / 100
+    cost = per_side_bps / 10_000
+    return 100 * (ratio * (1 - cost) * (1 - cost) - 1)
+
+
+def veto_objective_pct(gross_return_pct: float, per_side_bps: float) -> float:
+    return -gross_return_pct - 2 * per_side_bps / 100
+
+
+def predicate_matches(
+    predicate: Predicate,
+    *,
+    current: dict[str, Any],
+    by_timestamp: dict[datetime, dict[str, Any]],
+) -> bool:
+    timestamp = _parse_utc(current["timestamp"])
+    row = by_timestamp.get(timestamp - timedelta(hours=predicate.lag_hours))
+    if row is None or row.get(predicate.feature) is None:
+        return False
+    actual = row[predicate.feature]
+    operations = {
+        "eq": lambda left, right: left == right,
+        "in": lambda left, right: left in right,
+        "gt": lambda left, right: left > right,
+        "gte": lambda left, right: left >= right,
+        "lt": lambda left, right: left < right,
+        "lte": lambda left, right: left <= right,
+    }
+    try:
+        return bool(operations[predicate.operator](actual, predicate.value))
+    except (KeyError, TypeError):
+        return False
+
+
+def _event_row(
+    theory: TheorySpec,
+    current: dict[str, Any],
+    block: TimeBlock,
+    entry_at: datetime,
+    exit_at: datetime,
+    gross_return_pct: float,
+    gross_objective_pct: float,
+    costs: tuple[CostScenario, ...],
+    *,
+    evaluation_id: str,
+) -> dict[str, Any]:
+    row = {
+        "evaluation_id": evaluation_id,
+        "theory_id": theory.id,
+        "theory_role": theory.role,
+        "block_id": block.id,
+        "chain": str(current["chain"]),
+        "symbol": str(current["symbol"]),
+        "token_address": str(current["token_address"]),
+        "signal_timestamp": _timestamp_text(_parse_utc(current["timestamp"])),
+        "entry_timestamp": _timestamp_text(entry_at),
+        "exit_timestamp": _timestamp_text(exit_at),
+        "holding_period_hours": theory.holding_period_hours,
+        "gross_return_pct": gross_return_pct,
+        "gross_objective_pct": gross_objective_pct,
+    }
+    for cost in costs:
+        row[f"{cost.id}_objective_pct"] = (
+            veto_objective_pct(gross_return_pct, cost.per_side_bps)
+            if theory.role == "veto"
+            else entry_objective_pct(gross_return_pct, cost.per_side_bps)
+        )
+    return row
+
+
+def build_theory_events(
+    signal_rows: tuple[dict[str, Any], ...],
+    source_rows: tuple[dict[str, Any], ...],
+    theories: tuple[TheorySpec, ...],
+    *,
+    evaluation_id: str,
+    evaluation_start: datetime,
+    evaluation_end: datetime,
+    blocks: tuple[TimeBlock, ...],
+    entry_lag_hours: int,
+    costs: tuple[CostScenario, ...],
+) -> tuple[dict[str, Any], ...]:
+    signal_index: dict[tuple[str, str], dict[datetime, dict[str, Any]]] = {}
+    for row in signal_rows:
+        try:
+            identity = _normalized_identity(row["chain"], row["token_address"])
+            timestamp = _parse_utc(row["timestamp"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        signal_index.setdefault(identity, {}).setdefault(timestamp, row)
+
+    price_index: dict[tuple[str, str, datetime], float] = {}
+    for row in source_rows:
+        try:
+            identity = _normalized_identity(row["chain"], row["address"])
+            timestamp = _parse_utc(row["timestamp"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        price = _positive_finite_price(row)
+        if price is not None:
+            price_index.setdefault((*identity, timestamp), price)
+
+    earliest = datetime.min.replace(tzinfo=timezone.utc)
+    events: list[dict[str, Any]] = []
+    for theory in sorted(theories, key=lambda item: item.id):
+        next_allowed: dict[tuple[str, str], datetime] = {}
+        for current in sorted(signal_rows, key=_signal_sort_key):
+            timestamp = _parse_utc(current["timestamp"])
+            identity = _normalized_identity(current["chain"], current["token_address"])
+            if not evaluation_start <= timestamp < evaluation_end:
+                continue
+            if timestamp < next_allowed.get(identity, earliest):
+                continue
+            token_signals = signal_index.get(identity, {})
+            if not all(
+                predicate_matches(predicate, current=current, by_timestamp=token_signals)
+                for predicate in theory.predicates
+            ):
+                continue
+            entry_at = timestamp + timedelta(hours=entry_lag_hours)
+            exit_at = entry_at + timedelta(hours=theory.holding_period_hours)
+            if exit_at > evaluation_end:
+                continue
+            entry = price_index.get((*identity, entry_at))
+            exit_price = price_index.get((*identity, exit_at))
+            block = next((item for item in blocks if item.start <= timestamp < item.end), None)
+            if entry is None or exit_price is None or block is None:
+                continue
+            gross = round(100 * (exit_price / entry - 1), 12)
+            if not math.isfinite(gross):
+                continue
+            objective = -gross if theory.role == "veto" else gross
+            events.append(
+                _event_row(
+                    theory,
+                    current,
+                    block,
+                    entry_at,
+                    exit_at,
+                    gross,
+                    objective,
+                    costs,
+                    evaluation_id=evaluation_id,
+                )
+            )
+            next_allowed[identity] = exit_at
+    return tuple(events)
