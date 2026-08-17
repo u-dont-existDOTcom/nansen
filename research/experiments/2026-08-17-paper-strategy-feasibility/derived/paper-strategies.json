@@ -1,0 +1,118 @@
+{
+  "blocked_theories": [
+    {
+      "id": "buyer-breadth-exchange-confirmation-v1",
+      "missing_roles": [
+        "wallet_buyer_breadth",
+        "exchange_labelled_flow"
+      ],
+      "reason": "Frozen evidence lacks complete point-in-time wallet buyer breadth and exchange-labelled flow history."
+    }
+  ],
+  "comparisons": [
+    {
+      "comparison_id": "holder-breadth-incremental-v1",
+      "comparison_status": "advances_for_paper_discovery",
+      "event_median_base_spread_pct": 0.6657275563326959,
+      "positive_arm_theory_id": "holder-breadth-positive-arm-v1",
+      "reason_codes": "",
+      "reference_arm_theory_id": "holder-breadth-nonpositive-arm-v1",
+      "token_equal_mean_base_spread_pct": 8.414517919376026
+    }
+  ],
+  "evaluation_execution": {
+    "entry_lag_hours": 1,
+    "non_overlap": "one_open_episode_per_token",
+    "proxy_version": "next-hour-fixed-exit-v1"
+  },
+  "evaluation_id": "2026-08-17-paper-strategy-feasibility",
+  "mode": "paper_only",
+  "paper_execution_policy": {
+    "fixed_exit_hours": 4,
+    "maximum_quote_age_seconds": 60,
+    "minimum_quote_delay_minutes": 5,
+    "non_overlap": "one_open_episode_per_token",
+    "real_execution_enabled": false,
+    "recorded_costs": [
+      "fee",
+      "gas",
+      "spread",
+      "slippage"
+    ],
+    "signal_time": "max(bucket_end, provider_available_at)",
+    "unfilled_conditions": [
+      "missing_route",
+      "one_way_quoted_cost_above_2_5_pct"
+    ],
+    "virtual_notional_usd": "min(1000, 0.001 * point_in_time_liquidity_usd)"
+  },
+  "prospective_advancement_gates": {
+    "actual_simulated_cost_mean_must_be_positive": true,
+    "actual_simulated_cost_median_must_be_positive": true,
+    "max_token_pnl_contribution": 0.2,
+    "min_calendar_weeks": 8,
+    "min_fill_rate": 0.7,
+    "min_fills": 100,
+    "min_tokens": 20,
+    "point_in_time_liquidity_required": true,
+    "stress_expectancy_must_be_non_negative": true,
+    "timestamped_quotes_required": true,
+    "token_week_block_bootstrap_lower_one_sided_95_pct_must_be_positive": true
+  },
+  "selected_entry_theory_id": null,
+  "selected_theories": [],
+  "selected_veto_theory_id": null,
+  "selection_status": "no_paper_strategy_selected",
+  "source": {
+    "evidence_status": "discovery",
+    "point_in_time_guarantee": "unknown",
+    "signal_experiment_id": "2026-08-16-community-signal-shadow"
+  },
+  "unselected_theories": [
+    {
+      "id": "breadth-acceleration-inflection-v1",
+      "reason_codes": [
+        "insufficient_events",
+        "insufficient_tokens",
+        "nonpositive_token_equal_mean_base"
+      ],
+      "role": "entry"
+    },
+    {
+      "id": "distribution-risk-off-veto-v1",
+      "reason_codes": [
+        "requires_selected_entry"
+      ],
+      "role": "veto"
+    },
+    {
+      "id": "flow-only-benchmark-v1",
+      "reason_codes": [
+        "benchmark_only"
+      ],
+      "role": "reference"
+    },
+    {
+      "id": "holder-breadth-nonpositive-arm-v1",
+      "reason_codes": [
+        "comparison_only"
+      ],
+      "role": "comparison"
+    },
+    {
+      "id": "holder-breadth-positive-arm-v1",
+      "reason_codes": [
+        "comparison_only"
+      ],
+      "role": "comparison"
+    },
+    {
+      "id": "sustained-markup-confirmation-v1",
+      "reason_codes": [
+        "nonpositive_event_median_base"
+      ],
+      "role": "entry"
+    }
+  ],
+  "warning": "Unvalidated discovery shortlist for prospective paper testing only."
+}

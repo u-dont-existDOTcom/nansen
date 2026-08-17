@@ -51,6 +51,32 @@ flowchart LR
     hyp_exchange_outflow_confirmation -->|requires| req_point_in_time_state
     hyp_buyer_breadth -->|blocked_by| req_point_in_time_state
     hyp_exchange_outflow_confirmation -->|blocked_by| req_point_in_time_state
+
+    theory_flow_only_benchmark["Theory H0: flow-only benchmark"]
+    theory_distribution_risk_off["Theory H1: distribution risk-off veto"]
+    theory_breadth_acceleration["Theory H2: breadth/acceleration inflection"]
+    theory_holder_breadth_positive["Theory H3+: holder-breadth positive arm"]
+    theory_holder_breadth_nonpositive["Theory H3-: holder-breadth non-positive arm"]
+    theory_sustained_markup["Theory H4: sustained markup confirmation"]
+    theory_buyer_exchange["Theory H5: buyer-breadth plus exchange confirmation"]
+    exp_20260817_paper_strategy_feasibility["Experiment: 2026-08-17 paper-strategy feasibility (discovery)"]
+    obs_no_paper_strategy["Decision: no entry or paired veto selected for paper"]
+    obs_holder_breadth_advance["Observation: H3 positive-arm spreads both positive; descriptive advance only"]
+    req_beta_pit_execution["Requirement: complete beta/PIT history, pagination, liquidity, quotes, and costs"]
+
+    theory_flow_only_benchmark -->|tests| exp_20260817_paper_strategy_feasibility
+    theory_distribution_risk_off -->|tests| exp_20260817_paper_strategy_feasibility
+    theory_breadth_acceleration -->|tests| exp_20260817_paper_strategy_feasibility
+    theory_holder_breadth_positive -->|tests| exp_20260817_paper_strategy_feasibility
+    theory_holder_breadth_nonpositive -->|tests| exp_20260817_paper_strategy_feasibility
+    theory_sustained_markup -->|tests| exp_20260817_paper_strategy_feasibility
+    exp_20260817_paper_strategy_feasibility -->|rejected_for_paper| theory_breadth_acceleration
+    exp_20260817_paper_strategy_feasibility -->|rejected_for_paper| theory_sustained_markup
+    exp_20260817_paper_strategy_feasibility -->|rejected_for_paper| obs_no_paper_strategy
+    exp_20260817_paper_strategy_feasibility -->|descriptive_advance| obs_holder_breadth_advance
+    theory_distribution_risk_off -->|blocked_by_no_entry| obs_no_paper_strategy
+    theory_buyer_exchange -->|blocked_by| req_beta_pit_execution
+    exp_20260817_paper_strategy_feasibility -->|blocked_by| req_beta_pit_execution
 ```
 
 Observation evidence:
@@ -63,5 +89,7 @@ Observation evidence:
 - [`src_nansen_cli_builds`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — community claims are leads only.
 - [`src_nansen_divergence`](https://github.com/Ridwannurudeen/nansen-divergence) — direct source repository, which declares MIT; no community claim is treated as validated.
 - [`src_smrr`](https://github.com/Iziedking/Narrative-pulse) — direct Smart Money Rotation Radar source repository; its README labels the project MIT, while no separate license file was detected. No code or expression is copied.
+- [`exp_20260817_paper_strategy_feasibility`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md) — preregistered offline evaluation; no paper strategy selected.
+- [`obs_holder_breadth_advance`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md#decision) — descriptive H3 comparison result, not a selected entry strategy.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

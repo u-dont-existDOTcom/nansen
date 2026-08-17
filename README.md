@@ -58,9 +58,12 @@ The first public evidence bundle is the [`2026-08-16 seven-token pilot`](researc
 ```bash
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json --check
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-community-signal-shadow/manifest.json --check
+./nansen-lab evaluate --manifest research/experiments/2026-08-17-paper-strategy-feasibility/manifest.json --check
 ```
 
 The [`community-signal shadow`](research/experiments/2026-08-16-community-signal-shadow/REPORT.md) is a schema-v2, discovery-only companion derived from the immutable schema-v1 pilot. It uses `bucket_end` as feature availability, contains no fitted score, and cannot be used as a holdout while its point-in-time guarantee is unknown.
+
+The [`paper-strategy feasibility evaluation`](research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md) is a schema-v3 offline comparison of preregistered theories. It selected no entry strategy, so it emitted no paper shortlist; its holder-breadth comparison advanced only as a descriptive follow-up. The next evidence upgrade is a separately versioned historical/beta collection with complete point-in-time provenance, pagination, liquidity, quotes, and execution costs.
 
 `results/` is ignored scratch space for exploratory outputs. Evidence becomes durable only after it is copied byte-for-byte into `research/experiments/`, checksummed in a manifest, documented, and committed. The append-only [`research ledger`](docs/RESEARCH-LEDGER.md) and [`evidence graph`](docs/RESEARCH-GRAPH.md) preserve the experiment's claims, limitations, and follow-up state.
 

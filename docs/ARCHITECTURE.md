@@ -44,3 +44,15 @@ There are no automatic credit-spending calls: tests, analysis, and documentation
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json --check
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-community-signal-shadow/manifest.json --check
 ```
+
+## Offline schema-v3 paper feasibility
+
+`2026-08-17-paper-strategy-feasibility` binds by SHA-256 to the schema-v2 shadow and evaluates only manifest-declared trailing predicates. It rebuilds the validated source lineage in memory, enters at the exact next-hour source price, requires a mature fixed exit, prevents overlapping same-theory episodes per token, and applies frozen 100/250 basis-point per-side cost sensitivities. Chronological blocks are descriptive stability checks; there is no random split or fitted threshold.
+
+```bash
+./nansen-lab evaluate --manifest research/experiments/2026-08-17-paper-strategy-feasibility/manifest.json --check
+```
+
+The command is offline: it neither loads `.env` nor constructs `NansenClient`. Its schema-v3 outputs are deterministic event and summary CSVs plus a paper-only JSON decision. The current bundle selected no entry strategy. A distribution veto was individually eligible but cannot be selected without an entry, while the holder-breadth comparison advanced only for further discovery.
+
+The upgrade path is a new evidence collection, not threshold revision. Historical/beta endpoint use must archive every page, request, retrieval time, schema version, completeness marker, and hash, and may claim point-in-time status only where the provider contract explicitly supplies it. Historical Token Screener, Smart-Money balances, buyer/seller breadth, token-flow summaries, OHLCV, DEX trades, point-in-time liquidity, and executable quotes are the required inputs before a broader backtest or prospective paper advancement.

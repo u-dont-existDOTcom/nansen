@@ -1,0 +1,271 @@
+{
+  "schema_version": 3,
+  "experiment_id": "2026-08-17-paper-strategy-feasibility",
+  "title": "Preregistered paper strategy feasibility evaluation",
+  "status": "discovery",
+  "created_at": "2026-08-17T05:34:53Z",
+  "hypothesis": "Fixed trailing Smart-Money signal theories can be compared offline to select at most one entry theory and one paired risk-off veto for prospective paper discovery.",
+  "source_signal_manifest": "../2026-08-16-community-signal-shadow/manifest.json",
+  "source_signal_manifest_sha256": "881c544e2591f76c727bc30e2663d77df408e72acadd7866ee3c240f5c06b1b8",
+  "evaluation_window": {
+    "from": "2026-08-13T11:00:00Z",
+    "to": "2026-08-16T10:00:00Z"
+  },
+  "time_blocks": [
+    {
+      "id": "chronological-block-1",
+      "from": "2026-08-13T11:00:00Z",
+      "to": "2026-08-14T11:00:00Z"
+    },
+    {
+      "id": "chronological-block-2",
+      "from": "2026-08-14T11:00:00Z",
+      "to": "2026-08-15T11:00:00Z"
+    },
+    {
+      "id": "chronological-block-3",
+      "from": "2026-08-15T11:00:00Z",
+      "to": "2026-08-16T10:00:00Z"
+    }
+  ],
+  "execution": {
+    "proxy_version": "next-hour-fixed-exit-v1",
+    "entry_lag_hours": 1,
+    "non_overlap": "one_open_episode_per_token"
+  },
+  "cost_scenarios": [
+    {
+      "id": "base",
+      "per_side_bps": 100
+    },
+    {
+      "id": "stress",
+      "per_side_bps": 250
+    }
+  ],
+  "theories": [
+    {
+      "id": "flow-only-benchmark-v1",
+      "role": "reference",
+      "objective": "positive_return",
+      "holding_period_hours": 4,
+      "all": [
+        {
+          "feature": "holdings_change_1h_pct",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "distribution-risk-off-veto-v1",
+      "role": "veto",
+      "objective": "avoided_loss",
+      "holding_period_hours": 4,
+      "all": [
+        {
+          "feature": "market_phase_4h",
+          "operator": "in",
+          "value": [
+            "markdown",
+            "distribution_divergence"
+          ],
+          "lag_hours": 0
+        },
+        {
+          "feature": "distribution_persistence_4h",
+          "operator": "gte",
+          "value": 0.75,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holdings_acceleration_4h_pct_per_hour",
+          "operator": "lt",
+          "value": 0,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holder_count_change_4h",
+          "operator": "lt",
+          "value": 0,
+          "lag_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "breadth-acceleration-inflection-v1",
+      "role": "entry",
+      "objective": "positive_return",
+      "holding_period_hours": 4,
+      "all": [
+        {
+          "feature": "market_phase_4h",
+          "operator": "in",
+          "value": [
+            "markup",
+            "accumulation_divergence"
+          ],
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_persistence_4h",
+          "operator": "gte",
+          "value": 0.5,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holder_count_change_4h",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holdings_acceleration_4h_pct_per_hour",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holdings_acceleration_4h_pct_per_hour",
+          "operator": "lte",
+          "value": 0,
+          "lag_hours": 1
+        }
+      ]
+    },
+    {
+      "id": "holder-breadth-positive-arm-v1",
+      "role": "comparison",
+      "objective": "positive_return",
+      "holding_period_hours": 12,
+      "all": [
+        {
+          "feature": "holdings_change_4h_pct",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_persistence_4h",
+          "operator": "gte",
+          "value": 0.5,
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_retention_4h",
+          "operator": "gte",
+          "value": 0.8,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holder_count_change_4h",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "holder-breadth-nonpositive-arm-v1",
+      "role": "comparison",
+      "objective": "positive_return",
+      "holding_period_hours": 12,
+      "all": [
+        {
+          "feature": "holdings_change_4h_pct",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_persistence_4h",
+          "operator": "gte",
+          "value": 0.5,
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_retention_4h",
+          "operator": "gte",
+          "value": 0.8,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holder_count_change_4h",
+          "operator": "lte",
+          "value": 0,
+          "lag_hours": 0
+        }
+      ]
+    },
+    {
+      "id": "sustained-markup-confirmation-v1",
+      "role": "entry",
+      "objective": "positive_return",
+      "holding_period_hours": 4,
+      "all": [
+        {
+          "feature": "market_phase_12h",
+          "operator": "eq",
+          "value": "markup",
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_persistence_12h",
+          "operator": "gte",
+          "value": 0.5,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holder_count_change_12h",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        },
+        {
+          "feature": "accumulation_retention_12h",
+          "operator": "gte",
+          "value": 0.8,
+          "lag_hours": 0
+        },
+        {
+          "feature": "holdings_acceleration_12h_pct_per_hour",
+          "operator": "gt",
+          "value": 0,
+          "lag_hours": 0
+        }
+      ]
+    }
+  ],
+  "comparisons": [
+    {
+      "id": "holder-breadth-incremental-v1",
+      "positive_arm": "holder-breadth-positive-arm-v1",
+      "reference_arm": "holder-breadth-nonpositive-arm-v1"
+    }
+  ],
+  "blocked_theories": [
+    {
+      "id": "buyer-breadth-exchange-confirmation-v1",
+      "reason": "Frozen evidence lacks complete point-in-time wallet buyer breadth and exchange-labelled flow history.",
+      "missing_roles": [
+        "wallet_buyer_breadth",
+        "exchange_labelled_flow"
+      ]
+    }
+  ],
+  "paper_feasibility_gates": {
+    "entry_min_events": 5,
+    "entry_min_tokens": 3,
+    "entry_min_positive_blocks": 2,
+    "veto_min_events": 3,
+    "veto_min_tokens": 3
+  },
+  "prospective_advancement_gates": {
+    "min_calendar_weeks": 8,
+    "min_fills": 100,
+    "min_tokens": 20,
+    "min_fill_rate": 0.7,
+    "max_token_pnl_contribution": 0.2
+  }
+}
