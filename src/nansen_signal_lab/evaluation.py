@@ -978,6 +978,15 @@ _PAPER_EXECUTION_POLICY = {
     "real_execution_enabled": False,
 }
 
+_PROSPECTIVE_ADVANCEMENT_REQUIREMENTS = {
+    "timestamped_quotes_required": True,
+    "point_in_time_liquidity_required": True,
+    "actual_simulated_cost_mean_must_be_positive": True,
+    "actual_simulated_cost_median_must_be_positive": True,
+    "token_week_block_bootstrap_lower_one_sided_95_pct_must_be_positive": True,
+    "stress_expectancy_must_be_non_negative": True,
+}
+
 
 def _reason_list(row: dict[str, Any]) -> list[str]:
     raw = row.get("gate_reason_codes")
@@ -1098,9 +1107,10 @@ def build_paper_selection(
         "comparisons": [copy.deepcopy(item) for item in comparisons],
         "evaluation_execution": copy.deepcopy(bundle.manifest["execution"]),
         "paper_execution_policy": copy.deepcopy(_PAPER_EXECUTION_POLICY),
-        "prospective_advancement_gates": copy.deepcopy(
-            bundle.manifest["prospective_advancement_gates"]
-        ),
+        "prospective_advancement_gates": {
+            **copy.deepcopy(bundle.manifest["prospective_advancement_gates"]),
+            **copy.deepcopy(_PROSPECTIVE_ADVANCEMENT_REQUIREMENTS),
+        },
     }
 
 

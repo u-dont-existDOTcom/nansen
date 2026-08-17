@@ -1082,7 +1082,8 @@ def test_paper_selection_preserves_manifest_definitions_policies_and_blocked_rea
         "recorded_costs": ["fee", "gas", "spread", "slippage"],
         "real_execution_enabled": False,
     }
-    assert selection["prospective_advancement_gates"] == _summary_bundle().manifest["prospective_advancement_gates"]
+    for key, value in _summary_bundle().manifest["prospective_advancement_gates"].items():
+        assert selection["prospective_advancement_gates"][key] == value
     assert selection["blocked_theories"] == [{
         "id": "h5",
         "reason": "missing point-in-time inputs",
@@ -1101,6 +1102,28 @@ def test_paper_selection_preserves_manifest_definitions_policies_and_blocked_rea
                 visit(nested)
 
     visit(selection)
+
+
+def test_paper_selection_emits_every_mandatory_prospective_advancement_condition():
+    """Fails if the artifact reduces advancement to only numeric sample thresholds."""
+    selection = build_paper_selection(
+        _summary_bundle(),
+        (_eligible_summary("entry-v1", "entry"),),
+        (),
+    )
+    assert selection["prospective_advancement_gates"] == {
+        "min_calendar_weeks": 8,
+        "min_fills": 100,
+        "min_tokens": 20,
+        "min_fill_rate": 0.70,
+        "max_token_pnl_contribution": 0.20,
+        "timestamped_quotes_required": True,
+        "point_in_time_liquidity_required": True,
+        "actual_simulated_cost_mean_must_be_positive": True,
+        "actual_simulated_cost_median_must_be_positive": True,
+        "token_week_block_bootstrap_lower_one_sided_95_pct_must_be_positive": True,
+        "stress_expectancy_must_be_non_negative": True,
+    }
 
 
 def test_build_evaluation_runs_the_real_frozen_lineage_offline(tmp_path):
