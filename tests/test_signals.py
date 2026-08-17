@@ -69,6 +69,24 @@ def test_missing_holder_count_only_blanks_holder_breadth():
     assert row["holdings_change_2h_pct"] == pytest.approx(20)
 
 
+@pytest.mark.parametrize(
+    "holders_count",
+    [float("nan"), float("inf"), -1, True, "not-a-number"],
+    ids=["nan", "infinity", "negative", "boolean", "malformed"],
+)
+def test_signal_boundary_rejects_invalid_holder_counts(holders_count):
+    """Fails if invalid breadth input emits non-finite output or reaches subtraction."""
+    rows = tuple({**row, "holders_count": holders_count} for row in _fixture())
+
+    with pytest.raises(SignalError, match="invalid holders_count"):
+        build_signal_features(
+            rows,
+            horizons=(2,),
+            source_experiment_id="e",
+            feature_set_version="community-signals-v1",
+        )
+
+
 def test_flat_holdings_have_flat_phase():
     rows = tuple({**row, "token_amount": 100, "price_usd": 100 + i} for i, row in enumerate(_fixture()))
     row = build_signal_features(rows, horizons=(2,), source_experiment_id="e", feature_set_version="community-signals-v1")[6]

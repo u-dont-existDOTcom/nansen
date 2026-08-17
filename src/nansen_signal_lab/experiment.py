@@ -337,6 +337,23 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
             )
         request = flow_evidence.metadata["request"]
         request_identity = request.get("payload") if isinstance(request.get("payload"), dict) else request
+        request_labels = []
+        if "label" in request:
+            request_labels.append(request["label"])
+        if request_identity is not request:
+            if "label" not in request_identity:
+                raise ExperimentError(
+                    f"flow request label is missing from payload for {flow_id} ({context})"
+                )
+            request_labels.append(request_identity["label"])
+        if not request_labels:
+            raise ExperimentError(
+                f"flow request label is missing for {flow_id} ({context})"
+            )
+        if any(label != "smart_money" for label in request_labels):
+            raise ExperimentError(
+                f"flow request label must be smart_money for {flow_id} ({context})"
+            )
         request_chain = request_identity.get("chain")
         request_address = request_identity.get("token_address")
         if request_chain is not None and str(request_chain) != identity[0]:
@@ -456,6 +473,10 @@ def load_signal_manifest(manifest_path: str | Path) -> SignalBundle:
             f"source manifest checksum mismatch: expected {expected_hash}, got {actual_hash}"
         )
     source_bundle = load_and_validate_manifest(source_path)
+    if status == "holdout":
+        raise ExperimentError(
+            f"holdout companion cannot use a legacy schema-v1 source ({context})"
+        )
     source_horizons = set(source_bundle.manifest["horizons_hours"])
     if not set(horizons).issubset(source_horizons):
         raise ExperimentError(
@@ -503,6 +524,15 @@ def prepare_flow_rows(body: dict[str, Any]) -> PreparedRows:
             or price_usd <= 0
             or not isfinite(token_amount)
             or token_amount < 0
+        ):
+            invalid_metric_count += 1
+            continue
+        holders_count = raw.get("holders_count")
+        if holders_count is not None and (
+            not isinstance(holders_count, (int, float))
+            or isinstance(holders_count, bool)
+            or not isfinite(holders_count)
+            or holders_count < 0
         ):
             invalid_metric_count += 1
             continue
