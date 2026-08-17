@@ -13,6 +13,19 @@ import httpx
 
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 PROSPECTIVE_MODEL_ID = "gpt-5.6-sol"
+_EVIDENCE_RESPONSE_HEADERS = frozenset({
+    "content-type",
+    "date",
+    "openai-processing-ms",
+    "openai-version",
+    "x-request-id",
+    "x-ratelimit-limit-requests",
+    "x-ratelimit-limit-tokens",
+    "x-ratelimit-remaining-requests",
+    "x-ratelimit-remaining-tokens",
+    "x-ratelimit-reset-requests",
+    "x-ratelimit-reset-tokens",
+})
 
 
 def _utc_now() -> datetime:
@@ -196,6 +209,16 @@ class OpenAIClient:
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not self._api_key:
             raise OpenAIError("OPENAI_API_KEY is not set", transmitted=False)
+        if (
+            not self._api_key.startswith("sk-")
+            or len(self._api_key) < 20
+            or not self._api_key.isascii()
+            or any(character.isspace() for character in self._api_key)
+        ):
+            raise OpenAIError(
+                "OPENAI_API_KEY has invalid format",
+                transmitted=False,
+            )
         self._transport = transport
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
@@ -241,7 +264,11 @@ class OpenAIClient:
             status_code=response.status_code,
             request_started_at=request_started_at,
             response_retrieved_at=_utc_text(self._now()),
-            response_headers=dict(response.headers),
+            response_headers={
+                name: value
+                for name, value in response.headers.items()
+                if name.lower() in _EVIDENCE_RESPONSE_HEADERS
+            },
         )
         if response.status_code >= 400:
             raise OpenAIError(

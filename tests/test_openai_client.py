@@ -11,6 +11,59 @@ def _clock():
     return datetime(2026, 8, 17, 10, tzinfo=timezone.utc)
 
 
+def test_openai_transport_rejects_invalid_key_shape_before_transmission():
+    from src.nansen_signal_lab.openai_client import OpenAIClient, OpenAIError
+
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"id": "gpt-5.6-sol"})
+
+    with pytest.raises(OpenAIError, match="invalid format") as caught:
+        OpenAIClient(
+            api_key="not-an-openai-api-key",
+            transport=httpx.MockTransport(handler),
+            now=_clock,
+        )
+    assert caught.value.transmitted is False
+    assert calls == 0
+
+
+def test_openai_transport_retains_only_safe_evidence_headers():
+    from src.nansen_signal_lab.openai_client import OpenAIClient
+
+    client = OpenAIClient(
+        api_key="sk-test-secret-1234567890",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(
+            200,
+            json={"id": "gpt-5.6-sol"},
+            headers={
+                "Content-Type": "application/json",
+                "Date": "Mon, 17 Aug 2026 10:00:00 GMT",
+                "OpenAI-Processing-Ms": "7",
+                "OpenAI-Version": "2020-10-01",
+                "X-Request-ID": "request-1",
+                "Set-Cookie": "do-not-archive",
+                "Authorization": "do-not-archive",
+                "X-API-Key": "do-not-archive",
+            },
+        )),
+        now=_clock,
+    )
+
+    response = client.preflight_model("gpt-5.6-sol")
+
+    assert response.response_headers == {
+        "content-type": "application/json",
+        "date": "Mon, 17 Aug 2026 10:00:00 GMT",
+        "openai-processing-ms": "7",
+        "openai-version": "2020-10-01",
+        "x-request-id": "request-1",
+    }
+
+
 def test_openai_transport_uses_exact_model_and_responses_contract():
     from src.nansen_signal_lab.openai_client import OpenAIClient
     from src.nansen_signal_lab.gpt_protocol import PASS1_SCHEMA
@@ -35,7 +88,7 @@ def test_openai_transport_uses_exact_model_and_responses_contract():
         }).encode())
 
     client = OpenAIClient(
-        api_key="test-secret",
+        api_key="sk-test-secret-1234567890",
         transport=httpx.MockTransport(handler),
         now=_clock,
     )
@@ -50,7 +103,9 @@ def test_openai_transport_uses_exact_model_and_responses_contract():
 
     assert requests[0].method == "GET"
     assert requests[0].url.path == "/v1/models/gpt-5.6-sol"
-    assert requests[0].headers["authorization"] == "Bearer test-secret"
+    assert requests[0].headers["authorization"] == (
+        "Bearer sk-test-secret-1234567890"
+    )
     assert requests[1].method == "POST"
     assert requests[1].url.path == "/v1/responses"
     body = json.loads(requests[1].content)
@@ -85,7 +140,7 @@ def test_openai_transport_rejects_model_mismatch_and_redacts_failures():
     from src.nansen_signal_lab.openai_client import OpenAIClient, OpenAIError
 
     mismatch = OpenAIClient(
-        api_key="do-not-print-me",
+        api_key="sk-do-not-print-me-1234567890",
         transport=httpx.MockTransport(
             lambda request: httpx.Response(200, json={"id": "gpt-5.6-terra"})
         ),
@@ -93,12 +148,12 @@ def test_openai_transport_rejects_model_mismatch_and_redacts_failures():
     )
     with pytest.raises(OpenAIError, match="model mismatch") as caught:
         mismatch.preflight_model("gpt-5.6-sol")
-    assert "do-not-print-me" not in str(caught.value)
+    assert "sk-do-not-print-me-1234567890" not in str(caught.value)
     assert caught.value.transmitted is True
     assert caught.value.response is not None
 
     failed = OpenAIClient(
-        api_key="do-not-print-me",
+        api_key="sk-do-not-print-me-1234567890",
         transport=httpx.MockTransport(
             lambda request: httpx.Response(503, content=b"provider unavailable")
         ),
@@ -109,7 +164,7 @@ def test_openai_transport_rejects_model_mismatch_and_redacts_failures():
             model_id="gpt-5.6-sol", instructions="x", input_json={},
             schema_name="x", schema={"type": "object"},
         )
-    assert "do-not-print-me" not in str(caught.value)
+    assert "sk-do-not-print-me-1234567890" not in str(caught.value)
     assert caught.value.transmitted is True
     assert caught.value.response is not None
     assert caught.value.response.raw_body == b"provider unavailable"
@@ -126,7 +181,9 @@ def test_openai_transport_classifies_timeout_after_send_without_retry():
         raise httpx.ReadTimeout("late", request=request)
 
     client = OpenAIClient(
-        api_key="test", transport=httpx.MockTransport(timeout), now=_clock,
+        api_key="sk-test-secret-1234567890",
+        transport=httpx.MockTransport(timeout),
+        now=_clock,
     )
     with pytest.raises(OpenAIError, match="after transmission") as caught:
         client.create_structured(
@@ -143,7 +200,7 @@ def test_openai_transport_surfaces_refusal_without_treating_it_as_output():
 
     raw = b'{"id":"resp_r","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"no"}]}],"usage":{}}'
     client = OpenAIClient(
-        api_key="test",
+        api_key="sk-test-secret-1234567890",
         transport=httpx.MockTransport(lambda request: httpx.Response(200, content=raw)),
         now=_clock,
     )

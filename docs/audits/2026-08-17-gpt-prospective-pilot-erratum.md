@@ -31,3 +31,5 @@ Because the response was received after transmission, the no-reroll rule correct
 ## Remediation
 
 Add a local format guard that rejects non-`sk-`, whitespace-bearing, or implausibly short OpenAI API-key values with `transmitted=false`, plus a response-header allowlist that excludes `set-cookie` and credential-shaped headers from future metadata. Commit and verify that future-run fix separately from this immutable failed observation.
+
+The separate future-run remediation was subsequently completed test-first. Both regressions failed before the fix, the focused OpenAI/GPT/runner/CLI surface passed 75 tests afterward, and the final exact-tree suite passed 466 tests. The terminal experiment files and hashes above were not changed by that remediation.
