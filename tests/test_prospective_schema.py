@@ -127,13 +127,13 @@ def test_received_non_json_openapi_bytes_can_be_sealed_with_exact_metadata(tmp_p
     ) == _sha256(response)
 
 
-def test_committed_prospective_preregistration_is_valid_and_has_no_outcome():
+def test_committed_prospective_terminal_preflight_failure_is_valid_and_unscorable():
     manifest = (
         Path(__file__).resolve().parents[1]
         / "research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json"
     )
     bundle = load_prospective_manifest(manifest)
-    assert bundle.manifest["stage"] == "preregistered"
+    assert bundle.manifest["stage"] == "unscorable"
     assert bundle.manifest["max_nansen_calls"] == 10
     assert bundle.manifest["max_nansen_credits"] == 10
     contract = (
@@ -158,7 +158,15 @@ def test_committed_prospective_preregistration_is_valid_and_has_no_outcome():
     assert preregistration["scoring"]["ties_are_wins"] is False
     assert "result" not in preregistration
     assert not (bundle.root / "seals/outcome.json").exists()
-    assert not (bundle.root / "REPORT.md").exists()
+    assert (bundle.root / "REPORT.md").read_text().startswith("# Verdict: unscorable\n")
+    assert (bundle.root / "seals/unscorable.json").is_file()
+    assert not (bundle.root / "derived/selection.json").exists()
+    assert not (bundle.root / "normalized/snapshot.json").exists()
+    assert not (bundle.root / "model/pass-1").exists()
+    budget = json.loads(
+        (bundle.root / "budget/snapshots/unscorable.json").read_text()
+    )
+    assert budget["totals"] == {"calls": 0, "credits": 0}
 
 
 def _repo_fixture(tmp_path: Path) -> Path:

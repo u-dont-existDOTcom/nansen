@@ -79,16 +79,22 @@ flowchart LR
     exp_20260817_paper_strategy_feasibility -->|blocked_by| req_beta_pit_execution
 
     protocol_identity_blinded_gpt["Protocol: identity-blinded two-pass gpt-5.6-sol, no tools"]
-    exp_20260817_gpt_prospective_pilot["Experiment: 2026-08-17 GPT prospective pilot (preregistered)"]
+    exp_20260817_gpt_prospective_pilot["Experiment: 2026-08-17 GPT prospective pilot (terminal unscorable)"]
     req_sealed_common_execution["Requirement: sealed common DEX fills and closed 5m OHLCV"]
     lim_one_token_observation["Limitation: one page-local token and one four-hour observation"]
     next_gpt_prospective_outcome["Next observation: sealed decision then delayed paper settlement"]
+    obs_gpt_preflight_401["Terminal observation: model-access preflight HTTP 401; zero Nansen calls/credits"]
+    audit_gpt_pilot_invalidated["Audit: unusable; non-API credential should have failed local validation"]
+    next_gpt_successor_preregistration["Next test: separately preregistered successor after credential-gate fix"]
 
     exp_20260817_paper_strategy_feasibility -->|freezes_six_records_for| exp_20260817_gpt_prospective_pilot
     protocol_identity_blinded_gpt -->|tested_by| exp_20260817_gpt_prospective_pilot
     req_sealed_common_execution -->|required_by| exp_20260817_gpt_prospective_pilot
     exp_20260817_gpt_prospective_pilot -->|limited_by| lim_one_token_observation
     exp_20260817_gpt_prospective_pilot -->|preregistered_next| next_gpt_prospective_outcome
+    exp_20260817_gpt_prospective_pilot -->|terminated_before_snapshot| obs_gpt_preflight_401
+    obs_gpt_preflight_401 -->|invalidated_for_model_comparison| audit_gpt_pilot_invalidated
+    audit_gpt_pilot_invalidated -->|requires_new_preregistration| next_gpt_successor_preregistration
 ```
 
 Observation evidence:
@@ -103,6 +109,7 @@ Observation evidence:
 - [`src_smrr`](https://github.com/Iziedking/Narrative-pulse) — direct Smart Money Rotation Radar source repository; its README labels the project MIT, while no separate license file was detected. No code or expression is copied.
 - [`exp_20260817_paper_strategy_feasibility`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md) — preregistered offline evaluation; no paper strategy selected.
 - [`obs_holder_breadth_advance`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md#decision) — descriptive H3 comparison result, not a selected entry strategy.
-- [`exp_20260817_gpt_prospective_pilot`](../research/experiments/2026-08-17-gpt-prospective-pilot/PREREGISTRATION.md) — identity-blinded schema-v4 preregistration; no paid call, inference, selected token, or outcome exists yet.
+- [`exp_20260817_gpt_prospective_pilot`](../research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) — terminal schema-v4 bundle; the model preflight returned HTTP 401 before selection or inference, with zero Nansen calls/credits.
+- [`audit_gpt_pilot_invalidated`](audits/2026-08-17-gpt-prospective-pilot-erratum.md) — the terminal event is unusable for model comparison because an invalid credential class should have failed local validation.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

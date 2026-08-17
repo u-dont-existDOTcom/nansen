@@ -49,3 +49,12 @@ This ledger is append-only: add new dated entries at the end; do not rewrite pri
 - **Integrity:** Exact request/response bytes, credit headers, timestamps, canonical request hashes, immutable budget transitions/snapshots, stage transactions, collision quarantine, blinded snapshot hash, Pass 1 response hash, and terminal report hash are preserved. Ambiguous transmission, incomplete evidence, or unavailable required comparison becomes `unscorable`, never zero.
 - **Limitations:** One purposively selected page-local token and one four-hour observation cannot establish predictive validity or advancement. The experiment is paper-only and cannot create an order, wallet action, venue submission, executable-route claim, or capital movement.
 - **Follow-up:** Run only after the committed preregistration, full offline verification, and whole-branch pre-spend review are clean; then settle no earlier than the sealed closed-candle deadline and append the immutable outcome as a new ledger entry.
+
+## 2026-08-17 — GPT prospective pilot terminal preflight failure and invalidation
+
+- **Bundle:** [`research/experiments/2026-08-17-gpt-prospective-pilot/`](../research/experiments/2026-08-17-gpt-prospective-pilot/) — immutable schema-v4 terminal bundle; manifest SHA-256 `43b6da8703d14b2190bb10c93ade00f7ca3c0cee363c18a4eb77c975d717cfc3`.
+- **Terminal report:** [`REPORT.md`](../research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) — verdict `unscorable`; report SHA-256 `70ff849a6d535889d85e666d3bba03763913583c717ade02ae105f26b7241f54`.
+- **Observed event:** The public Nansen OpenAPI hash matched. The OpenAI model-access preflight then returned HTTP 401 with provider code `invalid_api_key`, so the no-reroll protocol sealed the experiment before selection or inference.
+- **Accounting:** Zero Nansen calls and zero Nansen credits. No selected token, blinded snapshot, GPT output, comparator decision, paper fill, market outcome, or headline comparison exists.
+- **Audit disposition:** Unusable as a model or strategy observation. The client accepted a nonempty credential that did not have an OpenAI API-key shape instead of rejecting it locally, contrary to the preregistered credential gate. See the [terminal-audit erratum](audits/2026-08-17-gpt-prospective-pilot-erratum.md).
+- **Follow-up:** Fix and verify local credential-shape validation for future runs. Any actual GPT test must use a separately named, separately committed preregistration; the sealed terminal bundle is never rerun or rewritten.
