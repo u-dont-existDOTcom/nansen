@@ -684,7 +684,7 @@ Use:
 
 - evaluation window `[2026-08-13T11:00:00Z, 2026-08-16T10:00:00Z)`;
 - blocks `[2026-08-13T11:00:00Z, 2026-08-14T11:00:00Z)`, `[2026-08-14T11:00:00Z, 2026-08-15T11:00:00Z)`, and `[2026-08-15T11:00:00Z, 2026-08-16T10:00:00Z)`;
-- the five evaluable theory records and predicates verbatim from the design;
+- the six evaluable records covering five hypotheses, with predicates verbatim from the design;
 - H3 comparison ID `holder-breadth-incremental-v1` with positive/reference arm IDs;
 - blocked H5 with missing roles `wallet_buyer_breadth` and `exchange_labelled_flow`;
 - all cost, feasibility, and advancement gates verbatim from the design.

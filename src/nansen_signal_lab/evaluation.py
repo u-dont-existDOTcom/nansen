@@ -450,6 +450,7 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         raise EvaluationError(f"comparisons must be a list{context}")
     comparisons: list[ComparisonSpec] = []
     comparison_ids: set[str] = set()
+    theory_roles = {item.id: item.role for item in theories}
     for record in comparisons_raw:
         _keys(record, _COMPARISON_KEYS, label="comparison", context=context)
         comparison_id = _nonempty_string(record["id"], field="comparison id", context=context)
@@ -458,6 +459,18 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         comparison_ids.add(comparison_id)
         positive = _nonempty_string(record["positive_arm"], field="comparison positive_arm", context=context)
         reference = _nonempty_string(record["reference_arm"], field="comparison reference_arm", context=context)
+        if positive == reference:
+            raise EvaluationError(
+                f"comparison {comparison_id} must use distinct arms{context}"
+            )
+        if positive not in theory_roles or reference not in theory_roles:
+            raise EvaluationError(
+                f"comparison {comparison_id} must reference existing theories{context}"
+            )
+        if theory_roles[positive] != "comparison" or theory_roles[reference] != "comparison":
+            raise EvaluationError(
+                f"comparison {comparison_id} must reference comparison-role theories{context}"
+            )
         comparisons.append(ComparisonSpec(comparison_id, positive, reference))
     blocked_raw = manifest["blocked_theories"]
     if not isinstance(blocked_raw, list):
@@ -699,6 +712,11 @@ def build_theory_events(
             entry_at = timestamp + timedelta(hours=entry_lag_hours)
             exit_at = entry_at + timedelta(hours=theory.holding_period_hours)
             if exit_at > evaluation_end:
+                continue
+            if any(
+                (*identity, entry_at + timedelta(hours=offset)) not in price_index
+                for offset in range(theory.holding_period_hours + 1)
+            ):
                 continue
             entry = price_index.get((*identity, entry_at))
             exit_price = price_index.get((*identity, exit_at))

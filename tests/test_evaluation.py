@@ -338,6 +338,59 @@ def test_load_evaluation_manifest_rejects_blocked_theory_that_is_evaluable(tmp_p
 
 
 @pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda manifest: manifest["comparisons"].append({
+                "id": "broken-comparison",
+                "positive_arm": "missing-theory",
+                "reference_arm": "entry-v1",
+            }),
+            "must reference existing theories",
+        ),
+        (
+            lambda manifest: manifest["comparisons"].append({
+                "id": "broken-comparison",
+                "positive_arm": "entry-v1",
+                "reference_arm": "entry-v1",
+            }),
+            "must use distinct arms",
+        ),
+        (
+            lambda manifest: manifest["comparisons"].append({
+                "id": "broken-comparison",
+                "positive_arm": "entry-v1",
+                "reference_arm": "comparison-v1",
+            }),
+            "must reference comparison-role theories",
+        ),
+    ],
+)
+def test_load_evaluation_manifest_rejects_invalid_comparison_arm_references(
+    tmp_path, mutate, message
+):
+    """Fails if malformed comparison references become plausible empty evidence."""
+    path, manifest = _bundle(tmp_path)
+    manifest["theories"].append({
+        "id": "comparison-v1",
+        "role": "comparison",
+        "objective": "positive_return",
+        "holding_period_hours": 4,
+        "all": [{
+            "feature": "market_phase_4h",
+            "operator": "eq",
+            "value": "markup",
+            "lag_hours": 0,
+        }],
+    })
+    mutate(manifest)
+    _write(path, manifest)
+
+    with pytest.raises(EvaluationError, match=message):
+        load_evaluation_manifest(path)
+
+
+@pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (
@@ -609,6 +662,16 @@ def test_build_theory_events_preserves_signal_only_predicates_despite_label_pois
 def test_build_theory_events_skips_missing_or_unexecutable_prices(source_rows):
     """Fails if missing, zero, or non-finite exact execution prices create an episode."""
     signals = (next(row for row in _literal_signal_rows() if row["timestamp"] == _timestamp(0)),)
+    assert _events(signals, source_rows, (_entry_theory(),)) == ()
+
+
+def test_build_theory_events_rejects_an_intermediate_hourly_price_gap():
+    """Fails if exact endpoints bridge a missing hourly execution history row."""
+    signals = (next(row for row in _literal_signal_rows() if row["timestamp"] == _timestamp(0)),)
+    source_rows = tuple(
+        row for row in _literal_source_rows() if row["timestamp"] != _timestamp(3)
+    )
+
     assert _events(signals, source_rows, (_entry_theory(),)) == ()
 
 
