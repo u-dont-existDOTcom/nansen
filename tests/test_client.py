@@ -5,9 +5,10 @@ import os
 from datetime import datetime, timezone
 
 import httpx
+import pytest
 
 import src.nansen_signal_lab.client as client_module
-from src.nansen_signal_lab.client import NansenClient
+from src.nansen_signal_lab.client import NansenClient, NansenRequestFailure
 
 
 def install_transport(monkeypatch, handler):
@@ -84,3 +85,156 @@ def test_post_keeps_returning_only_the_response_body(tmp_path, monkeypatch):
     client = NansenClient(api_key="test-key", cache_dir=tmp_path)
 
     assert client.post("tgm/flows", {"chain": "base"}) == {"data": [1]}
+
+
+def test_evidence_request_returns_exact_bytes_and_credit_headers(tmp_path, monkeypatch):
+    raw = b'{"data":[]}'
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            content=raw,
+            headers={
+                "X-Request-Id": "nansen-1",
+                "X-Nansen-Credits-Cost": "1",
+                "X-Nansen-Credits-Used": "1",
+                "X-Nansen-Credits-Remaining": "9",
+                "Server": "must-not-be-retained",
+            },
+        )
+
+    install_transport(monkeypatch, handler)
+    cache = tmp_path / "cache"
+    response = NansenClient(api_key="test", cache_dir=cache).request_evidence(
+        "POST", "tgm/flows", {"chain": "base"}, caller_request_id="pilot-1"
+    )
+
+    assert response.raw_body == raw
+    assert response.body == {"data": []}
+    assert response.body_parse_status == "json_object"
+    assert response.request_id == "nansen-1"
+    assert (response.credit_cost, response.credit_used, response.credit_remaining) == (1, 1, 9)
+    assert response.credit_header_errors == ()
+    assert response.response_headers == {
+        "X-Request-Id": "nansen-1",
+        "X-Nansen-Credits-Cost": "1",
+        "X-Nansen-Credits-Used": "1",
+        "X-Nansen-Credits-Remaining": "9",
+    }
+    assert requests[0].headers["X-Request-Id"] == "pilot-1"
+    assert requests[0].url.path == "/api/v1/tgm/flows"
+    assert len(requests) == 1
+    assert not cache.exists()
+
+
+def test_evidence_request_get_sends_no_body_and_uses_one_relative_prefix(tmp_path, monkeypatch):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"plan": "free"},
+            headers={
+                "X-Nansen-Credits-Cost": "0",
+                "X-Nansen-Credits-Used": "0",
+                "X-Nansen-Credits-Remaining": "10",
+            },
+        )
+
+    install_transport(monkeypatch, handler)
+    NansenClient(api_key="test", cache_dir=tmp_path / "absent").request_evidence(
+        "GET", "account", None, caller_request_id="account-1"
+    )
+
+    assert len(requests) == 1
+    assert requests[0].url.path == "/api/v1/account"
+    assert requests[0].content == b""
+
+
+@pytest.mark.parametrize(
+    ("status", "raw", "parse_status", "body"),
+    [
+        (429, b"<html>slow down</html>", "non_json", None),
+        (503, b"", "empty", None),
+        (400, b"[]", "json_other", []),
+    ],
+)
+def test_evidence_non_2xx_preserves_archivable_response(
+    tmp_path, monkeypatch, status, raw, parse_status, body
+):
+    install_transport(
+        monkeypatch,
+        lambda request: httpx.Response(
+            status,
+            content=raw,
+            headers={
+                "X-Request-Id": "failure-1",
+                "X-Nansen-Credits-Cost": "broken",
+                "X-Nansen-Credits-Used": "0",
+                "Retry-After": "12",
+            },
+        ),
+    )
+
+    with pytest.raises(NansenRequestFailure) as caught:
+        NansenClient(api_key="super-secret", cache_dir=tmp_path).request_evidence(
+            "POST", "tgm/flows", {}, caller_request_id="pilot-2"
+        )
+
+    failure = caught.value
+    assert failure.transmitted is True
+    assert failure.response is not None
+    assert failure.response.raw_body == raw
+    assert failure.response.body == body
+    assert failure.response.body_parse_status == parse_status
+    assert failure.response.response_headers == {
+        "X-Request-Id": "failure-1",
+        "X-Nansen-Credits-Cost": "broken",
+        "X-Nansen-Credits-Used": "0",
+        "Retry-After": "12",
+    }
+    assert failure.response.credit_cost is None
+    assert failure.response.credit_used == 0
+    assert failure.response.credit_header_errors == ("X-Nansen-Credits-Cost",)
+    assert "super-secret" not in str(failure)
+    assert "super-secret" not in repr(failure)
+
+
+@pytest.mark.parametrize("raw", [b"[]", b"not json", b""])
+def test_evidence_success_requires_json_object_and_keeps_response(tmp_path, monkeypatch, raw):
+    install_transport(monkeypatch, lambda request: httpx.Response(200, content=raw))
+
+    with pytest.raises(NansenRequestFailure) as caught:
+        NansenClient(api_key="secret-value", cache_dir=tmp_path).request_evidence(
+            "POST", "tgm/flows", {}, caller_request_id="pilot-3"
+        )
+
+    assert caught.value.transmitted is True
+    assert caught.value.response is not None
+    assert caught.value.response.raw_body == raw
+    assert "secret-value" not in repr(caught.value)
+
+
+def test_evidence_timeout_after_transmission_has_no_response_and_no_secret(tmp_path, monkeypatch):
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    install_transport(monkeypatch, handler)
+
+    with pytest.raises(NansenRequestFailure) as caught:
+        NansenClient(api_key="never-print-this", cache_dir=tmp_path).request_evidence(
+            "POST", "tgm/flows", {}, caller_request_id="pilot-4"
+        )
+
+    assert calls == 1
+    assert caught.value.transmitted is True
+    assert caught.value.response is None
+    assert "never-print-this" not in str(caught.value)
+    assert "never-print-this" not in repr(caught.value)
