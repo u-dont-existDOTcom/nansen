@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -64,6 +65,27 @@ def _response_content(body: dict[str, Any] | None) -> tuple[str | None, str | No
     return output_text, refusal
 
 
+def _provider_created_at(body: dict[str, Any] | None) -> str | None:
+    if not isinstance(body, dict):
+        return None
+    value = body.get("created_at", body.get("created"))
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and math.isfinite(float(value)) and value >= 0:
+        try:
+            return _utc_text(datetime.fromtimestamp(float(value), tz=timezone.utc))
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+            return _utc_text(parsed)
+    return None
+
+
 @dataclass(frozen=True)
 class OpenAIEvidenceResponse:
     body: dict[str, Any] | None
@@ -73,6 +95,7 @@ class OpenAIEvidenceResponse:
     request_started_at: str
     response_retrieved_at: str
     response_headers: Mapping[str, str]
+    provider_created_at: str | None
     response_id: str | None
     returned_model_id: str | None
     usage: Mapping[str, Any]
@@ -105,6 +128,7 @@ class OpenAIEvidenceResponse:
             request_started_at=request_started_at,
             response_retrieved_at=response_retrieved_at,
             response_headers=MappingProxyType(dict(response_headers)),
+            provider_created_at=_provider_created_at(body),
             response_id=response_id if isinstance(response_id, str) else None,
             returned_model_id=model if isinstance(model, str) else None,
             usage=MappingProxyType(dict(usage) if isinstance(usage, dict) else {}),

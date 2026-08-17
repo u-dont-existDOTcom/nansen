@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -429,3 +430,47 @@ def test_evaluate_command_is_offline_and_reports_verified_outputs(tmp_path, monk
     lines = capsys.readouterr().out.splitlines()
     assert len(lines) == 3
     assert all(line.startswith("verified: ") for line in lines)
+
+
+def test_pilot_offline_commands_never_load_credentials_or_construct_clients(
+    tmp_path, monkeypatch
+):
+    from test_prospective_runner import _repo
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot
+    from datetime import datetime, timezone
+
+    repo = _repo(tmp_path)
+    experiment = repo / "research/experiments/offline-prospective"
+    initialize_pilot(
+        experiment, created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc)
+    )
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("offline pilot command accessed credentials or a client")
+
+    monkeypatch.setattr(cli, "load_dotenv", forbidden)
+    monkeypatch.setattr(cli, "NansenClient", forbidden)
+    monkeypatch.setattr(cli, "OpenAIClient", forbidden, raising=False)
+    for arguments in (
+        ["pilot-replay", "--manifest", str(experiment / "manifest.json")],
+        ["pilot-check", "--manifest", str(experiment / "manifest.json")],
+        ["pilot-init", "--experiment-dir", str(experiment)],
+    ):
+        monkeypatch.setattr(sys, "argv", ["nansen-lab", *arguments])
+        cli.main()
+
+
+def test_pilot_parser_has_fixed_budget_and_no_override_flags():
+    parser = cli.build_parser()
+    args = parser.parse_args([
+        "pilot-start",
+        "--manifest", "experiment/manifest.json",
+        "--max-nansen-calls", "10",
+        "--max-nansen-credits", "10",
+    ])
+    assert args.max_nansen_calls == 10
+    assert args.max_nansen_credits == 10
+    with pytest.raises(SystemExit):
+        parser.parse_args([
+            "pilot-start", "--manifest", "experiment/manifest.json", "--force",
+        ])

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -11,6 +12,15 @@ from dotenv import load_dotenv
 
 from .artifacts import _flow_artifact_paths, write_api_artifacts, write_flow_artifacts
 from .client import NansenClient
+from .openai_client import OpenAIClient
+from .prospective_runner import (
+    check_pilot,
+    initialize_pilot,
+    replay_pilot,
+    settle_pilot,
+    start_pilot,
+)
+from .prospective_schema import load_prospective_manifest
 from .evaluation import evaluate_manifest
 from .experiment import analyze_manifest
 from .metrics import accumulation_class, flow_market_cap_ratio
@@ -252,6 +262,56 @@ def cmd_evaluate(args):
         print(f"{prefix}{path}")
 
 
+def cmd_pilot_init(args):
+    bundle = initialize_pilot(
+        Path(args.experiment_dir), created_at=datetime.now(timezone.utc)
+    )
+    print(f"initialized: {bundle.manifest_path}")
+    print(f"stage: {bundle.manifest['stage']}")
+
+
+def _pilot_bundle(manifest):
+    return load_prospective_manifest(Path(manifest))
+
+
+def cmd_pilot_start(args):
+    if args.max_nansen_calls != 10 or args.max_nansen_credits != 10:
+        raise ValueError("prospective pilot ceilings are fixed at ten calls and ten credits")
+    print("Nansen hard ceiling: 10 calls / 10 credits")
+    bundle = _pilot_bundle(args.manifest)
+    result = start_pilot(
+        bundle,
+        nansen=NansenClient(),
+        openai=OpenAIClient(),
+        clock=lambda: datetime.now(timezone.utc),
+        sleep=time.sleep,
+    )
+    print(f"preflight and start result: {result.manifest['stage']}")
+    if result.manifest["stage"] == "decision_sealed":
+        decision = json.loads((result.root / "derived/decision.json").read_text())
+        print(f"entry window: {decision['entry_window']['from']} to {decision['entry_window']['to']}")
+        print(f"earliest settlement: {decision['earliest_settlement_at']}")
+
+
+def cmd_pilot_settle(args):
+    result = settle_pilot(
+        _pilot_bundle(args.manifest),
+        nansen=NansenClient(),
+        clock=lambda: datetime.now(timezone.utc),
+    )
+    print(f"stage: {result.manifest['stage']}")
+
+
+def cmd_pilot_replay(args):
+    result = replay_pilot(_pilot_bundle(args.manifest))
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
+def cmd_pilot_check(args):
+    for path in check_pilot(_pilot_bundle(args.manifest)):
+        print(f"verified: {path}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="nansen-lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -309,12 +369,35 @@ def build_parser():
     s.add_argument("--manifest", required=True)
     s.add_argument("--check", action="store_true")
     s.set_defaults(func=cmd_evaluate)
+
+    s = sub.add_parser("pilot-init", help="initialize the prospective GPT pilot offline")
+    s.add_argument("--experiment-dir", required=True)
+    s.set_defaults(func=cmd_pilot_init)
+
+    s = sub.add_parser("pilot-start", help="collect and seal the prospective decision")
+    s.add_argument("--manifest", required=True)
+    s.add_argument("--max-nansen-calls", type=int, default=10)
+    s.add_argument("--max-nansen-credits", type=int, default=10)
+    s.set_defaults(func=cmd_pilot_start)
+
+    s = sub.add_parser("pilot-settle", help="collect the sealed pilot outcome")
+    s.add_argument("--manifest", required=True)
+    s.set_defaults(func=cmd_pilot_settle)
+
+    s = sub.add_parser("pilot-replay", help="replay a prospective pilot offline")
+    s.add_argument("--manifest", required=True)
+    s.set_defaults(func=cmd_pilot_replay)
+
+    s = sub.add_parser("pilot-check", help="verify a prospective pilot offline")
+    s.add_argument("--manifest", required=True)
+    s.set_defaults(func=cmd_pilot_check)
     return p
 
 
 def main():
     args = build_parser().parse_args()
-    if args.cmd != "evaluate":
+    offline_commands = {"evaluate", "pilot-init", "pilot-replay", "pilot-check"}
+    if args.cmd not in offline_commands:
         load_dotenv()
     args.func(args)
 

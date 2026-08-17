@@ -81,6 +81,52 @@ def test_raw_openai_response_is_hash_validated_through_companion_metadata(tmp_pa
         )
 
 
+def test_raw_nansen_response_is_hash_validated_through_companion_metadata(tmp_path):
+    response = tmp_path / "raw/nansen/abc/attempt-1-response.json"
+    response.parent.mkdir(parents=True)
+    response.write_bytes(b'{"data":[]}')
+    metadata = response.with_name("attempt-1-response-metadata.json")
+    _write_json(metadata, {
+        "schema_version": 1,
+        "attempt": 1,
+        "status_code": 200,
+        "request_started_at": "2026-08-17T10:00:00Z",
+        "response_retrieved_at": "2026-08-17T10:00:01Z",
+        "artifact_written_at": "2026-08-17T10:00:02Z",
+        "response_headers": {},
+        "request_id": "nansen-1",
+        "credit_cost": 1,
+        "credit_used": 1,
+        "credit_remaining": 9,
+        "credit_header_errors": [],
+        "body_parse_status": "json_object",
+        "response_file": response.name,
+        "response_sha256": _sha256(response),
+    })
+    assert prospective_schema._validate_artifact(
+        response,
+        seal_time=datetime(2026, 8, 17, 10, 1, tzinfo=timezone.utc),
+        require_written_at=False,
+    ) == _sha256(response)
+
+
+def test_received_non_json_openapi_bytes_can_be_sealed_with_exact_metadata(tmp_path):
+    response = tmp_path / "raw/contracts/nansen-openapi.json"
+    response.parent.mkdir(parents=True)
+    response.write_bytes(b"upstream gateway response")
+    metadata = response.with_name("nansen-openapi-metadata.json")
+    _write_json(metadata, {
+        "schema_version": 1,
+        "source_sha256": _sha256(response),
+        "artifact_written_at": "2026-08-17T10:00:02Z",
+    })
+    assert prospective_schema._validate_artifact(
+        response,
+        seal_time=datetime(2026, 8, 17, 10, 1, tzinfo=timezone.utc),
+        require_written_at=False,
+    ) == _sha256(response)
+
+
 def _repo_fixture(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     experiments = repo / "research/experiments"

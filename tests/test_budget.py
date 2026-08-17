@@ -399,6 +399,7 @@ def test_bind_request_artifact_requires_exact_canonical_identity(tmp_path, defec
         "request_sha256": reservation_sha256,
         "caller_request_id": "screen",
         "request_started_at": "2026-08-17T10:00:00Z",
+        "artifact_written_at": "2026-08-17T10:00:00Z",
         "transmission_may_begin": True,
     }
     if defect == "extra_key":
@@ -442,6 +443,7 @@ def test_reconcile_request_artifact_without_response_to_ambiguous(tmp_path):
             "request_sha256": identity_sha256,
             "caller_request_id": "screen",
             "request_started_at": "2026-08-17T10:00:00Z",
+            "artifact_written_at": "2026-08-17T10:00:00Z",
             "transmission_may_begin": True,
         },
     )
@@ -454,6 +456,27 @@ def test_reconcile_request_artifact_without_response_to_ambiguous(tmp_path):
     entry = guard.replay().entries[0]
     assert entry.state == "ambiguous"
     assert (guard.replay().calls, guard.replay().credits) == (1, 1)
+
+
+def test_bind_request_artifact_accepts_and_requires_durable_write_timestamp(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    identity = canonical_request_sha256("POST", "token-screener", {})
+    reservation = guard.reserve("screen", identity, "token-screener", 1)
+    path = tmp_path / "raw/nansen" / reservation.reservation_id / "attempt-1-request.json"
+    write_json_once(path, {
+        "method": "POST",
+        "endpoint": "token-screener",
+        "payload": {},
+        "request_sha256": identity,
+        "caller_request_id": "screen",
+        "request_started_at": "2026-08-17T10:00:00Z",
+        "artifact_written_at": "2026-08-17T10:00:01Z",
+        "transmission_may_begin": True,
+    })
+    bound = guard.bind_request_artifact(
+        reservation, hashlib.sha256(path.read_bytes()).hexdigest()
+    )
+    assert bound.request_artifact_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_journal_is_hash_linked_and_replay_rebuilds_an_exact_prefix_head(tmp_path):

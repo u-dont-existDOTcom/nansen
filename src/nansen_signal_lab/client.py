@@ -123,6 +123,13 @@ class NansenClient:
             raise NansenError("NANSEN_API_KEY is not set")
         self.cache_dir = Path(cache_dir)
 
+    def fetch_openapi(self) -> bytes:
+        """Fetch exact public contract bytes without transmitting credentials."""
+        with httpx.Client(timeout=60.0) as client:
+            response = client.get("https://api.nansen.ai/openapi.json")
+        response.raise_for_status()
+        return bytes(response.content)
+
     def _cache_path(self, endpoint: str, payload: dict[str, Any]) -> Path:
         canonical = json.dumps({"endpoint": endpoint, "payload": payload}, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(canonical.encode()).hexdigest()[:24]

@@ -274,6 +274,7 @@ class GPTArtifactWriter:
             "status_code": response.status_code,
             "request_started_at": response.request_started_at,
             "response_retrieved_at": response.response_retrieved_at,
+            "provider_created_at": response.provider_created_at,
             "artifact_written_at": artifact_written_at,
             "response_headers": dict(response.response_headers),
             "response_id": response.response_id,
@@ -608,8 +609,9 @@ def _load_response(writer: GPTArtifactWriter, scope: str, attempt: int) -> OpenA
     raw = response_path.read_bytes()
     expected_keys = {
         "schema_version", "attempt", "status_code", "request_started_at",
-        "response_retrieved_at", "artifact_written_at", "response_headers", "response_id",
-        "returned_model_id", "usage", "response_file", "response_sha256",
+        "response_retrieved_at", "provider_created_at", "artifact_written_at",
+        "response_headers", "response_id", "returned_model_id", "usage",
+        "response_file", "response_sha256",
     }
     if set(metadata) != expected_keys or metadata.get("schema_version") != 1:
         raise GPTProtocolError("OpenAI response metadata has an invalid shape")
@@ -622,6 +624,10 @@ def _load_response(writer: GPTArtifactWriter, scope: str, attempt: int) -> OpenA
         or not isinstance(status_code, int)
         or not isinstance(metadata.get("request_started_at"), str)
         or not isinstance(metadata.get("response_retrieved_at"), str)
+        or (
+            metadata.get("provider_created_at") is not None
+            and not isinstance(metadata.get("provider_created_at"), str)
+        )
         or not isinstance(metadata.get("artifact_written_at"), str)
         or not isinstance(headers, dict)
         or any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items())
@@ -639,6 +645,7 @@ def _load_response(writer: GPTArtifactWriter, scope: str, attempt: int) -> OpenA
     if (
         metadata.get("response_id") != response.response_id
         or metadata.get("returned_model_id") != response.returned_model_id
+        or metadata.get("provider_created_at") != response.provider_created_at
         or metadata.get("usage") != dict(response.usage)
     ):
         raise GPTProtocolError("OpenAI response metadata does not match exact response bytes")

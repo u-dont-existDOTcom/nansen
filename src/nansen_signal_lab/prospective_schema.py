@@ -297,6 +297,8 @@ def _timestamp_values(value: Any, *, location: str) -> Iterator[tuple[str, datet
     if isinstance(value, dict):
         parsed: dict[str, datetime] = {}
         for key in _TIMESTAMP_FIELDS & set(value):
+            if key == "provider_created_at" and value[key] is None:
+                continue
             parsed[key] = _time(value[key], field=f"{location} {key}")
             yield key, parsed[key]
         request = parsed.get("request_started_at")
@@ -332,14 +334,24 @@ def _validate_artifact(
         and path.name.startswith("attempt-")
         and path.name.endswith("-response.json")
     )
+    is_raw_nansen_response = (
+        path.parent.parent.name == "nansen"
+        and path.parent.parent.parent.name == "raw"
+        and path.name.startswith("attempt-")
+        and path.name.endswith("-response.json")
+    )
     metadata_path = path.with_name(
         path.name.removesuffix("-response.json") + "-response-metadata.json"
     )
-    if is_raw_model_response and metadata_path.is_file() and not metadata_path.is_symlink():
+    if (
+        (is_raw_model_response or is_raw_nansen_response)
+        and metadata_path.is_file()
+        and not metadata_path.is_symlink()
+    ):
         raw = path.read_bytes()
         metadata = _read_json(
             metadata_path,
-            label="OpenAI raw response metadata",
+            label="provider raw response metadata",
             canonical=True,
         )
         if (
@@ -350,7 +362,7 @@ def _validate_artifact(
             or not isinstance(metadata.get("response_retrieved_at"), str)
             or not isinstance(metadata.get("artifact_written_at"), str)
         ):
-            raise ProspectiveError("OpenAI raw response metadata is invalid")
+            raise ProspectiveError("provider raw response metadata is invalid")
         for field, timestamp in _timestamp_values(
             metadata,
             location=metadata_path.as_posix(),
@@ -358,6 +370,35 @@ def _validate_artifact(
             if timestamp > seal_time:
                 raise ProspectiveError(
                     f"seal recorded_at precedes referenced {field} timestamp in {metadata_path}"
+                )
+        return _sha256_bytes(raw)
+    is_raw_openapi = (
+        path.name == "nansen-openapi.json"
+        and path.parent.name == "contracts"
+        and path.parent.parent.name == "raw"
+    )
+    openapi_metadata = path.with_name("nansen-openapi-metadata.json")
+    if is_raw_openapi and openapi_metadata.is_file() and not openapi_metadata.is_symlink():
+        raw = path.read_bytes()
+        metadata = _read_json(
+            openapi_metadata,
+            label="Nansen OpenAPI raw metadata",
+            canonical=True,
+        )
+        if (
+            not isinstance(metadata, dict)
+            or metadata.get("schema_version") != 1
+            or metadata.get("source_sha256") != _sha256_bytes(raw)
+            or not isinstance(metadata.get("artifact_written_at"), str)
+        ):
+            raise ProspectiveError("Nansen OpenAPI raw metadata is invalid")
+        for field, timestamp in _timestamp_values(
+            metadata,
+            location=openapi_metadata.as_posix(),
+        ):
+            if timestamp > seal_time:
+                raise ProspectiveError(
+                    f"seal recorded_at precedes referenced {field} timestamp in {openapi_metadata}"
                 )
         return _sha256_bytes(raw)
     if path.suffix == ".json":

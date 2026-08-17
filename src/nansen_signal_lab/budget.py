@@ -82,6 +82,7 @@ _REQUEST_ARTIFACT_KEYS = {
     "request_sha256",
     "caller_request_id",
     "request_started_at",
+    "artifact_written_at",
     "transmission_may_begin",
 }
 
@@ -604,9 +605,15 @@ class BudgetGuard:
             or not isinstance(document["caller_request_id"], str)
             or not document["caller_request_id"]
             or not isinstance(document["request_started_at"], str)
+            or not isinstance(document["artifact_written_at"], str)
         ):
             raise BudgetError("request artifact does not match the reservation")
         _parse_time(document["request_started_at"], "request artifact start time")
+        written_at = _parse_time(
+            document["artifact_written_at"], "request artifact durable-write time"
+        )
+        if _parse_time(document["request_started_at"], "request artifact start time") > written_at:
+            raise BudgetError("request artifact durable-write time precedes its start")
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")

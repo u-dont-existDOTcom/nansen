@@ -20,10 +20,11 @@ def test_openai_transport_uses_exact_model_and_responses_contract():
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "GET":
-            return httpx.Response(200, content=b'{"id":"gpt-5.6-sol"}')
+            return httpx.Response(200, content=b'{"id":"gpt-5.6-sol","created":0}')
         return httpx.Response(200, content=json.dumps({
             "id": "resp_1",
             "model": "gpt-5.6-sol",
+            "created_at": 0,
             "status": "completed",
             "output": [{
                 "type": "message",
@@ -72,7 +73,9 @@ def test_openai_transport_uses_exact_model_and_responses_contract():
         body, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
     assert preflight.returned_model_id == "gpt-5.6-sol"
+    assert preflight.provider_created_at == "1970-01-01T00:00:00Z"
     assert result.response_id == "resp_1"
+    assert result.provider_created_at == "1970-01-01T00:00:00Z"
     assert result.output_text == "{}"
     assert result.usage == {"input_tokens": 12, "output_tokens": 3, "total_tokens": 15}
     assert result.raw_body.startswith(b'{"id": "resp_1"')
