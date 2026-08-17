@@ -120,6 +120,12 @@ _ADVANCEMENT_GATE_KEYS = {
 _OPERATORS = {"eq", "in", "gt", "gte", "lt", "lte"}
 _ROLES = {"entry", "veto", "reference", "comparison"}
 _OBJECTIVES = {"positive_return", "avoided_loss"}
+_ROLE_OBJECTIVES = {
+    "entry": "positive_return",
+    "veto": "avoided_loss",
+    "reference": "positive_return",
+    "comparison": "positive_return",
+}
 _IDENTITY_FIELDS = {
     "source_experiment_id",
     "feature_set_version",
@@ -298,6 +304,14 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         if blocks and start < blocks[-1].start:
             raise EvaluationError(f"time blocks must be ordered and non-overlapping{context}")
         blocks.append(TimeBlock(block_id, start, end))
+    if (
+        blocks[0].start != evaluation_start
+        or blocks[-1].end != evaluation_end
+        or any(left.end != right.start for left, right in zip(blocks, blocks[1:]))
+    ):
+        raise EvaluationError(
+            f"time blocks must form a contiguous full partition of evaluation window{context}"
+        )
 
     execution = manifest["execution"]
     _keys(execution, _EXECUTION_KEYS, label="execution", context=context)
@@ -376,6 +390,11 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         objective = record["objective"]
         if objective not in _OBJECTIVES:
             raise EvaluationError(f"invalid theory objective: {objective}{context}")
+        required_objective = _ROLE_OBJECTIVES[role]
+        if objective != required_objective:
+            raise EvaluationError(
+                f"theory {theory_id} role {role} requires objective {required_objective}{context}"
+            )
         holding = _strict_nonnegative_int(record["holding_period_hours"], field="theory holding_period_hours", context=context, positive=True)
         predicates_raw = record["all"]
         if not isinstance(predicates_raw, list) or not predicates_raw:
@@ -417,6 +436,12 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         if len(missing_roles) != len(set(missing_roles)):
             raise EvaluationError(f"blocked theory missing_roles must be unique{context}")
         blocked.append(BlockedTheorySpec(blocked_id, reason, tuple(missing_roles)))
+    overlapping_theory_ids = sorted(theory_ids & blocked_ids)
+    if overlapping_theory_ids:
+        raise EvaluationError(
+            "blocked theory IDs must not also be evaluable: "
+            f"{', '.join(overlapping_theory_ids)}{context}"
+        )
     _validate_gates(manifest["paper_feasibility_gates"], _PAPER_GATE_KEYS, label="paper feasibility gate", context=context)
     _validate_gates(manifest["prospective_advancement_gates"], _ADVANCEMENT_GATE_KEYS, label="prospective advancement gate", context=context)
 
@@ -487,6 +512,28 @@ def veto_objective_pct(gross_return_pct: float, per_side_bps: float) -> float:
     return -gross_return_pct - 2 * per_side_bps / 100
 
 
+def _scalar_kind(value: Any) -> str | None:
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if value is None:
+        return "none"
+    return None
+
+
+def _compatible_scalar_kinds(left: Any, right: Any) -> bool:
+    left_kind = _scalar_kind(left)
+    right_kind = _scalar_kind(right)
+    return left_kind is not None and left_kind == right_kind
+
+
+def _scalar_equals(left: Any, right: Any) -> bool:
+    return _compatible_scalar_kinds(left, right) and bool(left == right)
+
+
 def predicate_matches(
     predicate: Predicate,
     *,
@@ -498,9 +545,13 @@ def predicate_matches(
     if row is None or row.get(predicate.feature) is None:
         return False
     actual = row[predicate.feature]
+    if predicate.operator == "eq":
+        return _scalar_equals(actual, predicate.value)
+    if predicate.operator == "in":
+        return any(_scalar_equals(actual, candidate) for candidate in predicate.value)
+    if not _compatible_scalar_kinds(actual, predicate.value):
+        return False
     operations = {
-        "eq": lambda left, right: left == right,
-        "in": lambda left, right: left in right,
         "gt": lambda left, right: left > right,
         "gte": lambda left, right: left >= right,
         "lt": lambda left, right: left < right,

@@ -277,6 +277,63 @@ def test_load_evaluation_manifest_rejects_invalid_predicate_lag_and_operator(tmp
         load_evaluation_manifest(path)
 
 
+@pytest.mark.parametrize(
+    ("role", "objective"),
+    [
+        ("veto", "positive_return"),
+        ("entry", "avoided_loss"),
+        ("reference", "avoided_loss"),
+        ("comparison", "avoided_loss"),
+    ],
+)
+def test_load_evaluation_manifest_rejects_role_objective_mismatches(tmp_path, role, objective):
+    """Fails if a theory role can silently invert its declared objective."""
+    path, manifest = _bundle(tmp_path)
+    manifest["theories"][0].update({"role": role, "objective": objective})
+    _write(path, manifest)
+    with pytest.raises(EvaluationError, match="requires objective"):
+        load_evaluation_manifest(path)
+
+
+def test_load_evaluation_manifest_rejects_blocked_theory_that_is_evaluable(tmp_path):
+    """Fails if a blocked theory can still reach the event-building input."""
+    path, manifest = _bundle(tmp_path)
+    manifest["blocked_theories"] = [{
+        "id": "entry-v1",
+        "reason": "missing required point-in-time evidence",
+        "missing_roles": ["wallet_buyer_breadth"],
+    }]
+    _write(path, manifest)
+    with pytest.raises(EvaluationError, match="must not also be evaluable"):
+        load_evaluation_manifest(path)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda manifest: manifest["time_blocks"][0].update({"from": "2026-08-13T12:00:00Z"}),
+            "contiguous full partition",
+        ),
+        (
+            lambda manifest: manifest["time_blocks"][1].update({"from": "2026-08-14T12:00:00Z"}),
+            "contiguous full partition",
+        ),
+        (
+            lambda manifest: manifest["time_blocks"][1].update({"to": "2026-08-16T09:00:00Z"}),
+            "contiguous full partition",
+        ),
+    ],
+)
+def test_load_evaluation_manifest_requires_complete_contiguous_time_blocks(tmp_path, mutation, message):
+    """Fails if an unassigned portion of the evaluation window is omitted from blocks."""
+    path, manifest = _bundle(tmp_path)
+    mutation(manifest)
+    _write(path, manifest)
+    with pytest.raises(EvaluationError, match=message):
+        load_evaluation_manifest(path)
+
+
 def _utc(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
 
@@ -424,6 +481,28 @@ def test_predicate_matches_rejects_unavailable_value():
     )
 
 
+@pytest.mark.parametrize(
+    ("operator", "value", "actual", "expected"),
+    [
+        ("eq", True, 1, False),
+        ("eq", 1, True, False),
+        ("in", (True,), 1, False),
+        ("in", (1,), True, False),
+        ("eq", 1, 1.0, True),
+        ("in", (1.0,), 1, True),
+    ],
+)
+def test_predicate_matches_keeps_boolean_and_numeric_scalars_disjoint(operator, value, actual, expected):
+    """Fails if Python bool-as-int equality lets a boolean bypass a numeric predicate."""
+    timestamp = _utc("2026-08-01T01:00:00Z")
+    predicate = Predicate("holdings_acceleration_4h_pct_per_hour", operator, value, 0)
+    assert predicate_matches(
+        predicate,
+        current={"timestamp": "2026-08-01T01:00:00Z"},
+        by_timestamp={timestamp: {"holdings_acceleration_4h_pct_per_hour": actual}},
+    ) is expected
+
+
 def test_build_theory_events_enters_next_hour_and_exits_after_fixed_horizon():
     """Fails if an event uses the signal-hour price or an off-by-one fixed exit."""
     events = _events(
@@ -508,23 +587,36 @@ def test_build_theory_events_uses_exact_block_and_deterministic_theory_token_ord
     ]
 
 
-def test_build_theory_events_uses_veto_objective_and_per_theory_token_cooldown():
-    """Fails if overlapping same-token signals survive or vetoes use long-return objective."""
-    signals = tuple(row for row in _literal_signal_rows(second_token=True) if row["timestamp"] in {_timestamp(0), _timestamp(1)})
+def test_build_theory_events_uses_veto_objective():
+    """Fails if a veto uses the long-return rather than avoided-loss objective."""
+    signal = {**_literal_signal_rows()[0], "market_phase_4h": "distribution_divergence"}
+    events = _events((signal,), _literal_source_rows(prices={1: 100, 5: 95}), (_veto_theory(),))
+    assert events[0]["gross_return_pct"] == pytest.approx(-5.0)
+    assert events[0]["gross_objective_pct"] == pytest.approx(5.0)
+    assert events[0]["base_objective_pct"] == pytest.approx(3.0)
+
+
+def test_build_theory_events_enforces_same_theory_cooldown_but_allows_exit_boundary():
+    """Fails if cooldown is theory-agnostic, skips another token, or excludes the exit boundary."""
     signals = tuple(
-        {**row, "market_phase_4h": "distribution_divergence"}
-        if row["token_address"] == "0xtoken" else row
-        for row in signals
+        row
+        for row in _literal_signal_rows(second_token=True)
+        if (row["token_address"] == "0xtoken" and row["timestamp"] in {_timestamp(0), _timestamp(1), _timestamp(5)})
+        or (row["token_address"] == "0xother" and row["timestamp"] == _timestamp(1))
     )
-    events = _events(
-        signals,
-        _literal_source_rows(prices={1: 100, 5: 95}, second_token=True),
-        (_veto_theory(), _entry_theory()),
+    source_rows = _literal_source_rows(second_token=True) + tuple(
+        {
+            "chain": "base",
+            "symbol": "X",
+            "address": "0xtoken",
+            "timestamp": _timestamp(hour),
+            "price_usd": 100.0,
+        }
+        for hour in (9, 10)
     )
-    veto = [event for event in events if event["theory_id"] == "veto-v1"]
-    entry = [event for event in events if event["theory_id"] == "entry-v1"]
-    assert len(veto) == 1
-    assert veto[0]["gross_return_pct"] == pytest.approx(-5.0)
-    assert veto[0]["gross_objective_pct"] == pytest.approx(5.0)
-    assert veto[0]["base_objective_pct"] == pytest.approx(3.0)
-    assert [event["token_address"] for event in entry] == ["0xother"]
+    events = _events(signals, source_rows, (_entry_theory(),))
+    assert [(event["token_address"], event["signal_timestamp"]) for event in events] == [
+        ("0xtoken", _timestamp(0)),
+        ("0xother", _timestamp(1)),
+        ("0xtoken", _timestamp(5)),
+    ]
