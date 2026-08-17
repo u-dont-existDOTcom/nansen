@@ -1,0 +1,247 @@
+{
+  "account_response": {
+    "required": [
+      "plan",
+      "credits_remaining"
+    ],
+    "types": {
+      "credits_remaining": "integer",
+      "plan": "string"
+    }
+  },
+  "credit_costs": {
+    "account": {
+      "free": 0,
+      "pro": 0
+    },
+    "tgm/dex-trades": {
+      "free": 1,
+      "pro": 1
+    },
+    "tgm/flow-intelligence": {
+      "free": 1,
+      "pro": 1
+    },
+    "tgm/flows": {
+      "free": 1,
+      "pro": 1
+    },
+    "tgm/token-information": {
+      "free": 1,
+      "pro": 1
+    },
+    "tgm/token-ohlcv": {
+      "free": 1,
+      "pro": 1
+    },
+    "token-screener": {
+      "free": 1,
+      "pro": 1
+    }
+  },
+  "endpoint_contracts": {
+    "account": {
+      "method": "GET",
+      "path": "/api/v1/account",
+      "request_body": null,
+      "response_required": [
+        "plan",
+        "credits_remaining"
+      ]
+    },
+    "tgm/dex-trades": {
+      "method": "POST",
+      "path": "/api/v1/tgm/dex-trades",
+      "pilot_fixed_request": {
+        "filters.action": [
+          "BUY",
+          "SELL"
+        ],
+        "only_smart_money": false,
+        "order_by": [
+          {
+            "direction": "ASC",
+            "field": "block_timestamp"
+          },
+          {
+            "direction": "ASC",
+            "field": "transaction_hash"
+          }
+        ],
+        "pagination.per_page": 1000
+      },
+      "request_required": [
+        "chain",
+        "token_address",
+        "date"
+      ],
+      "response_data_fields_used": [
+        "block_timestamp",
+        "transaction_hash",
+        "action",
+        "token_amount",
+        "estimated_swap_price_usd",
+        "estimated_value_usd"
+      ],
+      "response_required": [
+        "data",
+        "pagination"
+      ]
+    },
+    "tgm/flow-intelligence": {
+      "method": "POST",
+      "path": "/api/v1/tgm/flow-intelligence",
+      "pilot_fixed_request": {
+        "timeframe": "1d"
+      },
+      "request_required": [
+        "chain",
+        "token_address"
+      ]
+    },
+    "tgm/flows": {
+      "method": "POST",
+      "path": "/api/v1/tgm/flows",
+      "pilot_fixed_request": {
+        "labels": [
+          "smart_money",
+          "exchange"
+        ],
+        "order_by": [
+          {
+            "direction": "ASC",
+            "field": "date"
+          }
+        ],
+        "pagination.page": 1,
+        "pagination.per_page": 1000
+      },
+      "request_required": [
+        "chain",
+        "token_address",
+        "date"
+      ],
+      "response_data_fields_used": [
+        "date",
+        "bucket_end",
+        "is_complete"
+      ],
+      "response_required": [
+        "data",
+        "pagination"
+      ]
+    },
+    "tgm/token-information": {
+      "method": "POST",
+      "path": "/api/v1/tgm/token-information",
+      "pilot_fixed_request": {
+        "timeframe": "1d"
+      },
+      "request_required": [
+        "chain",
+        "token_address",
+        "timeframe"
+      ]
+    },
+    "tgm/token-ohlcv": {
+      "method": "POST",
+      "path": "/api/v1/tgm/token-ohlcv",
+      "pilot_fixed_request": {
+        "timeframe": "5m"
+      },
+      "request_required": [
+        "chain",
+        "timeframe"
+      ],
+      "response_candle_fields_used": [
+        "interval_start",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "market_cap"
+      ],
+      "response_fields_used": [
+        "data",
+        "truncated"
+      ]
+    },
+    "token-screener": {
+      "method": "POST",
+      "path": "/api/v1/token-screener",
+      "pilot_fixed_request": {
+        "filters.include_stablecoins": false,
+        "filters.liquidity.min": 250000,
+        "filters.market_cap_usd.min": 1000000,
+        "filters.token_age_days.min": 3,
+        "filters.trader_type": "sm",
+        "order_by": [
+          {
+            "direction": "DESC",
+            "field": "netflow"
+          }
+        ],
+        "pagination.page": 1,
+        "pagination.per_page": 1000,
+        "timeframe": "24h"
+      },
+      "request_required": [
+        "chains"
+      ]
+    }
+  },
+  "fetched_at": "2026-08-17T07:21:29Z",
+  "openapi": "3.1.0",
+  "pagination_per_page_max": 1000,
+  "response_contracts": {
+    "credit_headers": {
+      "X-Nansen-Credits-Cost": "non-negative integer string when pricing was reached",
+      "X-Nansen-Credits-Remaining": "non-negative integer string when returned",
+      "X-Nansen-Credits-Used": "non-negative integer string when returned",
+      "X-Request-Id": "string"
+    },
+    "flow_completeness": {
+      "bucket_end_type": "RFC 3339 string or null",
+      "is_complete_type": "boolean or null",
+      "pagination_is_last_page_type": "boolean"
+    },
+    "ohlcv_completeness": {
+      "interval_start_type": "ISO datetime string",
+      "truncated_type": "boolean with default false"
+    },
+    "retry_after": {
+      "header_type": "integer string",
+      "statuses": [
+        429,
+        502,
+        503,
+        504
+      ]
+    }
+  },
+  "selected_contracts": {
+    "dex_trade_sort_fields": [
+      "block_timestamp",
+      "transaction_hash"
+    ],
+    "flow_intelligence_timeframe": "1d",
+    "flow_intelligence_timeframe_enum": [
+      "5m",
+      "1h",
+      "6h",
+      "12h",
+      "1d",
+      "7d"
+    ],
+    "screener_filter": {
+      "trader_type": "sm"
+    },
+    "screener_filter_note": "The live schema marks only_smart_money deprecated and states trader_type overrides it.",
+    "screener_sort_field": "netflow"
+  },
+  "source_sha256": "d01160d54c375f022d839d4c0619b51928bfcc652a5308fdd8c927a1e53e7548",
+  "source_url": "https://api.nansen.ai/openapi.json",
+  "title": "Nansen API",
+  "version": "1.0.0"
+}
