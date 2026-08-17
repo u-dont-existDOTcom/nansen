@@ -29,7 +29,7 @@ flowchart LR
 
     src_nansen_cli_builds["Source: Nansen CLI Builds community catalog"]
     src_nansen_divergence["Source lead: Nansen Divergence"]
-    src_smrr["Source lead: Smart Money Rotation Radar (no declared license)"]
+    src_smrr["Source lead: Smart Money Rotation Radar (README labels MIT; no separate license file detected)"]
     lead_supply_control["Lead: exchange withdrawal / supply control"]
     lead_four_hour_rotation["Lead: four-hour rotation cadence"]
     hyp_persistence_acceleration["Hypothesis: persistence and acceleration may describe regimes"]
@@ -46,11 +46,11 @@ flowchart LR
     lead_supply_control -->|not_yet_replicated| hyp_exchange_outflow_confirmation
     lead_four_hour_rotation -->|not_yet_replicated| hyp_persistence_acceleration
     hyp_persistence_acceleration -->|tests| exp_20260816_community_signal_shadow
-    hyp_buyer_breadth -->|tests| exp_20260816_community_signal_shadow
-    hyp_exchange_outflow_confirmation -->|tests| exp_20260816_community_signal_shadow
     exp_20260816_community_signal_shadow -->|blocked_by| req_point_in_time_state
-    req_point_in_time_state -->|requires| hyp_buyer_breadth
-    req_point_in_time_state -->|requires| hyp_exchange_outflow_confirmation
+    hyp_buyer_breadth -->|requires| req_point_in_time_state
+    hyp_exchange_outflow_confirmation -->|requires| req_point_in_time_state
+    hyp_buyer_breadth -->|blocked_by| req_point_in_time_state
+    hyp_exchange_outflow_confirmation -->|blocked_by| req_point_in_time_state
 ```
 
 Observation evidence:
@@ -61,7 +61,7 @@ Observation evidence:
 - [`obs_toad_no_reversal`](../research/experiments/2026-08-16-seven-token-pilot/REPORT.md#event-weighted-timing-analysis)
 - [`obs_cate_mixed`](../research/experiments/2026-08-16-seven-token-pilot/REPORT.md#event-weighted-timing-analysis)
 - [`src_nansen_cli_builds`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — community claims are leads only.
-- [`src_nansen_divergence`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — provenance link; no community claim is treated as validated.
-- [`src_smrr`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — provenance link; no code or expression is copied because the referenced repository has no declared license.
+- [`src_nansen_divergence`](https://github.com/Ridwannurudeen/nansen-divergence) — direct source repository, which declares MIT; no community claim is treated as validated.
+- [`src_smrr`](https://github.com/Iziedking/Narrative-pulse) — direct Smart Money Rotation Radar source repository; its README labels the project MIT, while no separate license file was detected. No code or expression is copied.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).
