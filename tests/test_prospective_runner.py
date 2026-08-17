@@ -245,7 +245,7 @@ class FakeOpenAI:
 
 
 def test_initialize_pilot_creates_offline_preregistered_bundle(tmp_path):
-    from src.nansen_signal_lab.prospective_runner import initialize_pilot
+    from src.nansen_signal_lab.prospective_runner import check_pilot, initialize_pilot
 
     bundle = initialize_pilot(
         _repo(tmp_path) / "research/experiments/fixture-prospective",
@@ -256,6 +256,7 @@ def test_initialize_pilot_creates_offline_preregistered_bundle(tmp_path):
     assert bundle.manifest["max_nansen_credits"] == 10
     assert (bundle.root / "PREREGISTRATION.md").is_file()
     assert not (bundle.root / "REPORT.md").exists()
+    assert bundle.root / "PREREGISTRATION.md" in check_pilot(bundle)
 
 
 def test_full_fake_lifecycle_uses_exact_billable_calls_and_replays_offline(tmp_path):

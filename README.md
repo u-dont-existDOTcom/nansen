@@ -65,6 +65,13 @@ The [`community-signal shadow`](research/experiments/2026-08-16-community-signal
 
 The [`paper-strategy feasibility evaluation`](research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md) is a schema-v3 offline comparison of preregistered theories. It selected no entry strategy, so it emitted no paper shortlist; its holder-breadth comparison advanced only as a descriptive follow-up. The next evidence upgrade is a separately versioned historical/beta collection with complete point-in-time provenance, pagination, liquidity, quotes, and execution costs.
 
+The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/PREREGISTRATION.md) is a schema-v4, one-token paper observation. Its preregistration fixes an identity-blinded `gpt-5.6-sol` two-pass protocol, all six frozen comparator records, common observed fills, strict-greater-than win semantics, and a ten-call/ten-credit Nansen ceiling. `pilot-init`, `pilot-replay`, and `pilot-check` are offline; only explicit `pilot-start` and `pilot-settle` invocations can access providers. An unavailable or incomplete comparison is `unscorable`, never zero, and the workflow cannot create an order, wallet action, venue submission, or capital movement.
+
+```bash
+./nansen-lab pilot-replay --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
+./nansen-lab pilot-check --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
+```
+
 `results/` is ignored scratch space for exploratory outputs. Evidence becomes durable only after it is copied byte-for-byte into `research/experiments/`, checksummed in a manifest, documented, and committed. The append-only [`research ledger`](docs/RESEARCH-LEDGER.md) and [`evidence graph`](docs/RESEARCH-GRAPH.md) preserve the experiment's claims, limitations, and follow-up state.
 
 [Powered by Nansen API](https://nansen.ai/). Public Token Screener and `tgm/flows` evidence is included under Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

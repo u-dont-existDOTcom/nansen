@@ -231,10 +231,25 @@ def initialize_pilot(
 
     timestamp = _utc_text(created)
     experiment_id = root.name
+    source_sha256 = _sha256_file(source)
     contract_value = json.loads(contract.read_text())
     openapi_sha256 = contract_value.get("source_sha256")
     if not isinstance(openapi_sha256, str) or len(openapi_sha256) != 64:
         raise PilotError("pinned Nansen contract lacks the full OpenAPI SHA-256")
+    preregistration_md = (
+        "# Prospective GPT pilot preregistration\n\n"
+        "Status: preregistered; no paid call or GPT inference has run.\n\n"
+        "The identity-blinded two-pass `gpt-5.6-sol` decision is compared with all "
+        "six frozen records on one common four-hour paper outcome. A tie is not a "
+        "win; unavailable comparison evidence is not zero. This is a one-token, "
+        "one-observation pilot and cannot establish advancement.\n\n"
+        "Design: `../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md`.\n"
+    ).encode("utf-8")
+    preregistration_text = _install_bytes(
+        root / "PREREGISTRATION.md",
+        preregistration_md,
+        kind="preregistration_text",
+    )
     preregistration = {
         "schema_version": 1,
         "experiment_id": experiment_id,
@@ -250,36 +265,59 @@ def initialize_pilot(
         "selection": {
             "page": 1,
             "rule": "page-local highest eligible Smart-Money netflow",
+            "screener_request": screener_payload(),
             "virtual_notional": "min(1000, 0.001 * screener_liquidity_usd)",
             "prior_cohort_excluded": True,
         },
+        "frozen_comparators": {
+            "record_count": 6,
+            "source_strategy_manifest_sha256": source_sha256,
+            "paired_distribution_veto": True,
+        },
         "budget": {"max_nansen_calls": 10, "max_nansen_credits": 10},
         "nansen_openapi_source_sha256": openapi_sha256,
+        "lifecycle": {
+            "stages": [
+                "preregistered",
+                "snapshot_collected",
+                "decision_sealed",
+                "entry_observed",
+                "settled",
+            ],
+            "terminal_failure_stage": "unscorable",
+            "earliest_settlement": (
+                "first UTC five-minute boundary after exit_window.to plus 60 seconds"
+            ),
+        },
         "execution": {
             "entry_window": "[t0+5m,t0+10m)",
             "exit_window": "[entry_start+4h,entry_start+4h+5m)",
             "paper_only": True,
             "orders_or_wallet_actions": False,
         },
+        "scoring": {
+            "fill_source": "common observed DEX trades",
+            "unfilled_is_zero": False,
+            "unavailable_is_zero": False,
+            "cash_benchmark_return": 0.0,
+            "strict_win": (
+                "Pass 2 net return is strictly greater than every applicable "
+                "scorable frozen comparator"
+            ),
+            "ties_are_wins": False,
+        },
         "headline_rule": (
             "Pass 2 must be strictly greater than every applicable scorable frozen "
             "comparator; ties are not wins and unavailable baselines are unscorable."
         ),
+        "preregistration_markdown": {
+            "path": preregistration_text.name,
+            "sha256": _sha256_file(preregistration_text),
+        },
     }
     preregistration_path = _install_json(
         root / "preregistration.json", preregistration, kind="preregistration"
     )
-    preregistration_md = (
-        "# Prospective GPT pilot preregistration\n\n"
-        "Status: preregistered; no paid call or GPT inference has run.\n\n"
-        "The identity-blinded two-pass `gpt-5.6-sol` decision is compared with all "
-        "six frozen records on one common four-hour paper outcome. A tie is not a "
-        "win; unavailable comparison evidence is not zero. This is a one-token, "
-        "one-observation pilot and cannot establish advancement.\n\n"
-        "Design: `../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md`.\n"
-    ).encode("utf-8")
-    _install_bytes(root / "PREREGISTRATION.md", preregistration_md, kind="preregistration_text")
-
     manifest = {
         "schema_version": 4,
         "experiment_id": experiment_id,
@@ -291,7 +329,7 @@ def initialize_pilot(
         ),
         "stage": "preregistered",
         "source_strategy_manifest": _SOURCE_PATH,
-        "source_strategy_manifest_sha256": _sha256_file(source),
+        "source_strategy_manifest_sha256": source_sha256,
         "preregistration_path": "preregistration.json",
         "preregistration_sha256": _sha256_file(preregistration_path),
         "design_path": _DESIGN_PATH,
@@ -1393,7 +1431,11 @@ def check_pilot(bundle: ProspectiveBundle) -> tuple[Path, ...]:
     totals = BudgetGuard(current.root, 10, 10).replay()
     if totals.calls > 10 or totals.credits > 10:
         raise PilotError("verified budget exceeds the preregistered ceiling")
-    paths = [current.manifest_path, current.root / "preregistration.json"]
+    paths = [
+        current.manifest_path,
+        current.root / "preregistration.json",
+        current.root / "PREREGISTRATION.md",
+    ]
     paths.extend(current.root / item["path"] for item in current.manifest["seals"])
     paths.extend(current.root / item["path"] for item in current.manifest["artifacts"])
     for path in paths:

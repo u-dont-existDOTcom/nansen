@@ -77,6 +77,18 @@ flowchart LR
     theory_distribution_risk_off -->|blocked_by_no_entry| obs_no_paper_strategy
     theory_buyer_exchange -->|blocked_by| req_beta_pit_execution
     exp_20260817_paper_strategy_feasibility -->|blocked_by| req_beta_pit_execution
+
+    protocol_identity_blinded_gpt["Protocol: identity-blinded two-pass gpt-5.6-sol, no tools"]
+    exp_20260817_gpt_prospective_pilot["Experiment: 2026-08-17 GPT prospective pilot (preregistered)"]
+    req_sealed_common_execution["Requirement: sealed common DEX fills and closed 5m OHLCV"]
+    lim_one_token_observation["Limitation: one page-local token and one four-hour observation"]
+    next_gpt_prospective_outcome["Next observation: sealed decision then delayed paper settlement"]
+
+    exp_20260817_paper_strategy_feasibility -->|freezes_six_records_for| exp_20260817_gpt_prospective_pilot
+    protocol_identity_blinded_gpt -->|tested_by| exp_20260817_gpt_prospective_pilot
+    req_sealed_common_execution -->|required_by| exp_20260817_gpt_prospective_pilot
+    exp_20260817_gpt_prospective_pilot -->|limited_by| lim_one_token_observation
+    exp_20260817_gpt_prospective_pilot -->|preregistered_next| next_gpt_prospective_outcome
 ```
 
 Observation evidence:
@@ -91,5 +103,6 @@ Observation evidence:
 - [`src_smrr`](https://github.com/Iziedking/Narrative-pulse) — direct Smart Money Rotation Radar source repository; its README labels the project MIT, while no separate license file was detected. No code or expression is copied.
 - [`exp_20260817_paper_strategy_feasibility`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md) — preregistered offline evaluation; no paper strategy selected.
 - [`obs_holder_breadth_advance`](../research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md#decision) — descriptive H3 comparison result, not a selected entry strategy.
+- [`exp_20260817_gpt_prospective_pilot`](../research/experiments/2026-08-17-gpt-prospective-pilot/PREREGISTRATION.md) — identity-blinded schema-v4 preregistration; no paid call, inference, selected token, or outcome exists yet.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

@@ -735,16 +735,14 @@ At CLI dispatch, define an explicit offline set containing `evaluate`, `pilot-in
 
 ```bash
 .venv/bin/python -m pytest -q tests/test_prospective_runner.py tests/test_cli.py
-./nansen-lab pilot-replay --manifest tests/fixtures/prospective-pilot/manifest.json
-./nansen-lab pilot-check --manifest tests/fixtures/prospective-pilot/manifest.json
 ```
 
-Expected: fixture lifecycle settles, replay/check pass, and no credential or network access occurs.
+Expected: the isolated fixture lifecycle settles, its replay/check assertions pass, and no credential or network access occurs outside the injected fake providers.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/nansen_signal_lab/prospective_runner.py src/nansen_signal_lab/cli.py tests/test_prospective_runner.py tests/test_cli.py tests/fixtures/prospective-pilot
+git add src/nansen_signal_lab/prospective_runner.py src/nansen_signal_lab/cli.py tests/test_prospective_runner.py tests/test_cli.py
 git commit -m "Orchestrate prospective GPT pilot"
 ```
 
@@ -808,8 +806,7 @@ Add one dated ledger entry and stable graph node. Document schema-v4 lifecycle, 
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json --check
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-community-signal-shadow/manifest.json --check
 ./nansen-lab evaluate --manifest research/experiments/2026-08-17-paper-strategy-feasibility/manifest.json --check
-./nansen-lab pilot-replay --manifest tests/fixtures/prospective-pilot/manifest.json
-./nansen-lab pilot-check --manifest tests/fixtures/prospective-pilot/manifest.json
+./nansen-lab pilot-replay --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
 ./nansen-lab pilot-check --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
 git diff --check
 ```

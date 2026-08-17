@@ -474,6 +474,31 @@ def _validate_manifest_fields(root: Path, manifest: Any) -> dict[str, Any]:
     )
     if _sha256_file(preregistration) != expected_preregistration:
         raise ProspectiveError("preregistration checksum mismatch")
+    preregistration_document = _read_json(
+        preregistration, label="prospective preregistration", canonical=True
+    )
+    markdown_reference = (
+        preregistration_document.get("preregistration_markdown")
+        if isinstance(preregistration_document, dict)
+        else None
+    )
+    if not isinstance(markdown_reference, dict) or set(markdown_reference) != {
+        "path",
+        "sha256",
+    }:
+        raise ProspectiveError("preregistration must bind PREREGISTRATION.md")
+    markdown_text, markdown_path = _bundle_ref(
+        root,
+        markdown_reference["path"],
+        label="preregistration markdown path",
+    )
+    if markdown_text != "PREREGISTRATION.md" or not markdown_path.is_file():
+        raise ProspectiveError("preregistration markdown must name PREREGISTRATION.md")
+    markdown_sha256 = _hash(
+        markdown_reference["sha256"], field="preregistration markdown sha256"
+    )
+    if _sha256_file(markdown_path) != markdown_sha256:
+        raise ProspectiveError("preregistration markdown checksum mismatch")
 
     repo_root = root.parents[2]
     source_text = _string(

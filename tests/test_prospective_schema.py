@@ -127,6 +127,40 @@ def test_received_non_json_openapi_bytes_can_be_sealed_with_exact_metadata(tmp_p
     ) == _sha256(response)
 
 
+def test_committed_prospective_preregistration_is_valid_and_has_no_outcome():
+    manifest = (
+        Path(__file__).resolve().parents[1]
+        / "research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json"
+    )
+    bundle = load_prospective_manifest(manifest)
+    assert bundle.manifest["stage"] == "preregistered"
+    assert bundle.manifest["max_nansen_calls"] == 10
+    assert bundle.manifest["max_nansen_credits"] == 10
+    contract = (
+        Path(__file__).resolve().parents[1]
+        / "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
+    )
+    assert bundle.manifest["nansen_contract_sha256"] == _sha256(contract)
+    preregistration = json.loads((bundle.root / "preregistration.json").read_text())
+    markdown = bundle.root / "PREREGISTRATION.md"
+    assert preregistration["preregistration_markdown"] == {
+        "path": "PREREGISTRATION.md",
+        "sha256": _sha256(markdown),
+    }
+    assert preregistration["selection"]["screener_request"]["filters"] == {
+        "trader_type": "sm",
+        "include_stablecoins": False,
+        "token_age_days": {"min": 3},
+        "market_cap_usd": {"min": 1_000_000},
+        "liquidity": {"min": 250_000},
+    }
+    assert preregistration["lifecycle"]["terminal_failure_stage"] == "unscorable"
+    assert preregistration["scoring"]["ties_are_wins"] is False
+    assert "result" not in preregistration
+    assert not (bundle.root / "seals/outcome.json").exists()
+    assert not (bundle.root / "REPORT.md").exists()
+
+
 def _repo_fixture(tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
     experiments = repo / "research/experiments"
@@ -143,12 +177,19 @@ def _manifest(repo: Path, experiment_id: str = "fixture-prospective") -> dict:
     root = repo / "research/experiments" / experiment_id
     source = root.parent / "2026-08-17-paper-strategy-feasibility/manifest.json"
     preregistration = root / "preregistration.json"
+    markdown = root / "PREREGISTRATION.md"
+    markdown.parent.mkdir(parents=True, exist_ok=True)
+    markdown.write_text("# Prospective fixture\n")
     _write_json(
         preregistration,
         {
             "schema_version": 1,
             "experiment_id": experiment_id,
             "artifact_written_at": "2026-08-17T09:00:00Z",
+            "preregistration_markdown": {
+                "path": "PREREGISTRATION.md",
+                "sha256": _sha256(markdown),
+            },
         },
     )
     return {

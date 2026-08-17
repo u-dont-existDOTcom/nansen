@@ -56,3 +56,20 @@ There are no automatic credit-spending calls: tests, analysis, and documentation
 The command is offline: it neither loads `.env` nor constructs `NansenClient`. Its schema-v3 outputs are deterministic event and summary CSVs plus a paper-only JSON decision. The current bundle selected no entry strategy. A distribution veto was individually eligible but cannot be selected without an entry, while the holder-breadth comparison advanced only for further discovery.
 
 The upgrade path is a new evidence collection, not threshold revision. Historical/beta endpoint use must archive every page, request, retrieval time, schema version, completeness marker, and hash, and may claim point-in-time status only where the provider contract explicitly supplies it. Historical Token Screener, Smart-Money balances, buyer/seller breadth, token-flow summaries, OHLCV, DEX trades, point-in-time liquidity, and executable quotes are the required inputs before a broader backtest or prospective paper advancement.
+
+## Prospective schema-v4 GPT pilot
+
+`2026-08-17-gpt-prospective-pilot` is a one-token, paper-only observation bound by hash to the frozen schema-v3 strategy records, the prospective design, and the pinned Nansen OpenAPI contract extract. Its lifecycle is append-only: `preregistered -> snapshot_collected -> decision_sealed -> entry_observed -> settled`, with `unscorable` as a terminal failure state. Every stage uses a hash-linked seal and an immutable snapshot of the Nansen budget journal; the mutable budget head is only a recoverable cache.
+
+Before any paid call, the runner verifies the public OpenAPI bytes, archives a model-access preflight, and requires an explicit zero-cost Nansen account response. Every provider request is installed before transmission and every received response is archived as exact bytes with headers and timing metadata. A transmitted request without a complete response is ambiguous and is never rerolled. Only an explicit zero-use 429 may receive one persisted retry. The hard ceiling is ten Nansen calls and ten credits.
+
+The selected candidate's address and symbol are sealed separately in `derived/selection.json`; GPT receives only `normalized/snapshot.json`, whose identity is `candidate-1`. Pass 1 chooses `LONG` or `ABSTAIN` from that snapshot. Pass 2 receives the exact same snapshot, the exact Pass 1 response hash, and all six frozen theory records without their historical outcomes. Neither pass has tools or prior-response chaining.
+
+All GPT and comparator actions share the same observed DEX entry/exit evidence and closed five-minute OHLCV grid. Incomplete pages, open/gapped candles, unavailable predicates, unfilled orders, and cash are distinct states. Pass 2 wins only when its scored net return is strictly greater than every applicable scorable comparator; ties are not wins. The workflow is descriptive and paper-only: no code path submits an order, touches a wallet, estimates gas, moves capital, or claims an executable route.
+
+```bash
+# Offline, credential-free commands
+./nansen-lab pilot-init --experiment-dir research/experiments/2026-08-17-gpt-prospective-pilot
+./nansen-lab pilot-replay --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
+./nansen-lab pilot-check --manifest research/experiments/2026-08-17-gpt-prospective-pilot/manifest.json
+```
