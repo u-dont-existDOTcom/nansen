@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -375,9 +376,7 @@ def load_and_validate_manifest(manifest_path: str | Path) -> Bundle:
 
 
 def load_signal_manifest(manifest_path: str | Path) -> SignalBundle:
-    requested_path = Path(manifest_path)
-    if not requested_path.is_absolute():
-        requested_path = Path.cwd() / requested_path
+    requested_path = Path(os.path.abspath(os.fspath(manifest_path)))
     experiments_root = requested_path.parent.parent.resolve()
     path = requested_path.resolve()
     if path.name != "manifest.json" or path.parent.parent != experiments_root:
