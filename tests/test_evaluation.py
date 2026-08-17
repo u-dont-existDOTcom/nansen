@@ -6,17 +6,25 @@ import json
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from src.nansen_signal_lab.evaluation import (
     BlockedTheorySpec,
+    ComparisonSpec,
     CostScenario,
+    EvaluationBundle,
     EvaluationError,
+    EvaluationTables,
     Predicate,
     TheorySpec,
     TimeBlock,
+    build_comparison_results,
+    build_evaluation,
+    build_paper_selection,
     build_theory_events,
+    build_theory_summaries,
     entry_objective_pct,
     load_evaluation_manifest,
     predicate_matches,
@@ -671,3 +679,437 @@ def test_build_theory_events_enforces_same_theory_cooldown_but_allows_exit_bound
         ("0xother", _timestamp(1)),
         ("0xtoken", _timestamp(5)),
     ]
+
+
+def _theory_record(theory: TheorySpec) -> dict:
+    return {
+        "id": theory.id,
+        "role": theory.role,
+        "objective": theory.objective,
+        "holding_period_hours": theory.holding_period_hours,
+        "all": [
+            {
+                "feature": predicate.feature,
+                "operator": predicate.operator,
+                "value": list(predicate.value) if predicate.operator == "in" else predicate.value,
+                "lag_hours": predicate.lag_hours,
+            }
+            for predicate in theory.predicates
+        ],
+    }
+
+
+def _summary_bundle(
+    *,
+    theories: tuple[TheorySpec, ...] | None = None,
+    blocks: tuple[TimeBlock, ...] | None = None,
+    comparisons: tuple[ComparisonSpec, ...] = (),
+    blocked: tuple[BlockedTheorySpec, ...] = (),
+) -> EvaluationBundle:
+    theories = theories or (_entry_theory(),)
+    blocks = blocks or (
+        TimeBlock("b1", _WINDOW_START, _utc("2026-08-01T12:00:00Z")),
+        TimeBlock("b2", _utc("2026-08-01T12:00:00Z"), _WINDOW_END),
+    )
+    manifest = {
+        "experiment_id": "e",
+        "status": "discovery",
+        "execution": {
+            "proxy_version": "next-hour-fixed-exit-v1",
+            "entry_lag_hours": 1,
+            "non_overlap": "one_open_episode_per_token",
+        },
+        "evaluation_window": {
+            "from": "2026-08-01T00:00:00Z",
+            "to": "2026-08-02T00:00:00Z",
+        },
+        "theories": [_theory_record(theory) for theory in theories],
+        "paper_feasibility_gates": {
+            "entry_min_events": 5,
+            "entry_min_tokens": 3,
+            "entry_min_positive_blocks": 2,
+            "veto_min_events": 3,
+            "veto_min_tokens": 3,
+        },
+        "prospective_advancement_gates": {
+            "min_calendar_weeks": 8,
+            "min_fills": 100,
+            "min_tokens": 20,
+            "min_fill_rate": 0.70,
+            "max_token_pnl_contribution": 0.20,
+        },
+    }
+    source_bundle = SimpleNamespace(
+        experiment_id="signal-source",
+        manifest={
+            "experiment_id": "signal-source",
+            "point_in_time_guarantee": "unknown",
+        },
+        source_bundle=None,
+    )
+    return EvaluationBundle(
+        root=Path("/tmp/e"),
+        manifest_path=Path("/tmp/e/manifest.json"),
+        manifest=manifest,
+        source_bundle=source_bundle,
+        theories=theories,
+        blocks=blocks,
+        costs=_COSTS,
+        comparisons=comparisons,
+        blocked_theories=blocked,
+    )
+
+
+def _summary_event(
+    *,
+    theory_id: str = "entry-v1",
+    role: str = "entry",
+    block_id: str = "b1",
+    token: str = "0xa",
+    gross: float = 2.0,
+    base: float = 2.0,
+    stress: float = 1.0,
+) -> dict:
+    return {
+        "evaluation_id": "e",
+        "theory_id": theory_id,
+        "theory_role": role,
+        "block_id": block_id,
+        "chain": "base",
+        "symbol": token.upper(),
+        "token_address": token,
+        "signal_timestamp": "2026-08-01T01:00:00Z",
+        "entry_timestamp": "2026-08-01T02:00:00Z",
+        "exit_timestamp": "2026-08-01T06:00:00Z",
+        "holding_period_hours": 4,
+        "gross_return_pct": gross,
+        "gross_objective_pct": gross,
+        "base_objective_pct": base,
+        "stress_objective_pct": stress,
+    }
+
+
+def _events_for_token_equal_test() -> tuple[dict, ...]:
+    return (
+        _summary_event(token="0xa", gross=3, base=2, stress=1),
+        _summary_event(token="0xa", gross=3, base=2, stress=1),
+        _summary_event(token="0xa", gross=3, base=2, stress=1),
+        _summary_event(token="0xb", block_id="b2", gross=-1, base=-2, stress=-3),
+    )
+
+
+def test_summary_is_token_equal_not_event_frequency_weighted():
+    """Fails if event frequency rather than equal-token means drives the headline."""
+    summary = build_theory_summaries(_events_for_token_equal_test(), _summary_bundle())[0]
+    assert summary["event_mean_base_objective_pct"] == pytest.approx(1.0)
+    assert summary["token_equal_mean_base_objective_pct"] == pytest.approx(0.0)
+
+
+def test_summary_reports_literal_event_and_concentration_metrics():
+    """Fails if medians, wins, token means, or positive-PnL concentration drift."""
+    summary = build_theory_summaries(_events_for_token_equal_test(), _summary_bundle())[0]
+    assert summary == {
+        "evaluation_id": "e",
+        "theory_id": "entry-v1",
+        "theory_role": "entry",
+        "block_id": "all",
+        "event_count": 4,
+        "token_count": 2,
+        "event_mean_gross_objective_pct": pytest.approx(2.0),
+        "event_median_gross_objective_pct": pytest.approx(3.0),
+        "event_mean_base_objective_pct": pytest.approx(1.0),
+        "event_median_base_objective_pct": pytest.approx(2.0),
+        "event_mean_stress_objective_pct": pytest.approx(0.0),
+        "event_median_stress_objective_pct": pytest.approx(1.0),
+        "event_win_rate_base": pytest.approx(0.75),
+        "token_equal_mean_gross_objective_pct": pytest.approx(1.0),
+        "token_equal_mean_base_objective_pct": pytest.approx(0.0),
+        "token_equal_mean_stress_objective_pct": pytest.approx(-1.0),
+        "max_token_positive_pnl_contribution": pytest.approx(1.0),
+        "gate_status": "ineligible",
+        "gate_reason_codes": "insufficient_events;insufficient_positive_blocks;insufficient_tokens;nonpositive_token_equal_mean_base",
+    }
+
+
+def test_summaries_include_every_theory_and_declared_block_even_with_no_events():
+    """Fails if sparse theories or blocks disappear from the evidence table."""
+    theories = (
+        _entry_theory(),
+        TheorySpec("reference-v1", "reference", "positive_return", 4, _entry_theory().predicates),
+    )
+    summaries = build_theory_summaries((), _summary_bundle(theories=theories))
+    assert [(row["theory_id"], row["block_id"]) for row in summaries] == [
+        ("entry-v1", "all"),
+        ("entry-v1", "b1"),
+        ("entry-v1", "b2"),
+        ("reference-v1", "all"),
+        ("reference-v1", "b1"),
+        ("reference-v1", "b2"),
+    ]
+    zero = summaries[1]
+    assert zero["event_count"] == 0
+    assert zero["token_count"] == 0
+    assert all(
+        zero[key] is None
+        for key in (
+            "event_mean_gross_objective_pct",
+            "event_median_gross_objective_pct",
+            "event_mean_base_objective_pct",
+            "event_median_base_objective_pct",
+            "event_mean_stress_objective_pct",
+            "event_median_stress_objective_pct",
+            "event_win_rate_base",
+            "token_equal_mean_gross_objective_pct",
+            "token_equal_mean_base_objective_pct",
+            "token_equal_mean_stress_objective_pct",
+            "max_token_positive_pnl_contribution",
+        )
+    )
+    assert zero["gate_status"] == "not_applicable"
+    assert zero["gate_reason_codes"] == ""
+
+
+def _eligible_events(theory_id: str, role: str, count: int) -> tuple[dict, ...]:
+    tokens = ("0xa", "0xb", "0xc")
+    return tuple(
+        _summary_event(
+            theory_id=theory_id,
+            role=role,
+            block_id="b1" if index % 2 == 0 else "b2",
+            token=tokens[index % len(tokens)],
+            gross=3,
+            base=2,
+            stress=1,
+        )
+        for index in range(count)
+    )
+
+
+def test_entry_and_veto_gates_cover_every_success_and_failure_reason():
+    """Fails if any frozen feasibility criterion is omitted or role-inverted."""
+    entry = TheorySpec("entry-good", "entry", "positive_return", 4, _entry_theory().predicates)
+    entry_bad = TheorySpec("entry-bad", "entry", "positive_return", 4, _entry_theory().predicates)
+    veto = TheorySpec("veto-good", "veto", "avoided_loss", 4, _veto_theory().predicates)
+    veto_bad = TheorySpec("veto-bad", "veto", "avoided_loss", 4, _veto_theory().predicates)
+    bad_entry_events = tuple(
+        _summary_event(
+            theory_id="entry-bad",
+            role="entry",
+            block_id="b1",
+            token="0xa" if index % 2 == 0 else "0xb",
+            gross=-1,
+            base=-1,
+            stress=-2,
+        )
+        for index in range(4)
+    )
+    bad_veto_events = tuple(
+        _summary_event(
+            theory_id="veto-bad",
+            role="veto",
+            block_id="b1",
+            token="0xa" if index % 2 == 0 else "0xb",
+            gross=-1,
+            base=-1,
+            stress=-2,
+        )
+        for index in range(2)
+    )
+    summaries = build_theory_summaries(
+        _eligible_events("entry-good", "entry", 6)
+        + bad_entry_events
+        + _eligible_events("veto-good", "veto", 3)
+        + bad_veto_events,
+        _summary_bundle(theories=(entry, entry_bad, veto, veto_bad)),
+    )
+    overall = {row["theory_id"]: row for row in summaries if row["block_id"] == "all"}
+    assert overall["entry-good"]["gate_status"] == "eligible"
+    assert overall["entry-good"]["gate_reason_codes"] == ""
+    assert overall["entry-bad"]["gate_reason_codes"] == (
+        "insufficient_events;insufficient_positive_blocks;insufficient_tokens;"
+        "nonpositive_event_median_base;nonpositive_token_equal_mean_base"
+    )
+    assert overall["veto-good"]["gate_status"] == "eligible"
+    assert overall["veto-good"]["gate_reason_codes"] == ""
+    assert overall["veto-bad"]["gate_reason_codes"] == (
+        "insufficient_events;insufficient_tokens;nonpositive_event_median_base;"
+        "nonpositive_token_equal_mean_base"
+    )
+
+
+def test_reference_and_comparison_arms_are_never_selection_eligible():
+    """Fails if benchmark or descriptive comparison roles enter selection."""
+    reference = TheorySpec("benchmark", "reference", "positive_return", 4, _entry_theory().predicates)
+    comparison = TheorySpec("arm", "comparison", "positive_return", 4, _entry_theory().predicates)
+    summaries = build_theory_summaries(
+        _eligible_events("benchmark", "reference", 6) + _eligible_events("arm", "comparison", 6),
+        _summary_bundle(theories=(reference, comparison)),
+    )
+    overall = {row["theory_id"]: row for row in summaries if row["block_id"] == "all"}
+    assert (overall["benchmark"]["gate_status"], overall["benchmark"]["gate_reason_codes"]) == (
+        "ineligible",
+        "benchmark_only",
+    )
+    assert (overall["arm"]["gate_status"], overall["arm"]["gate_reason_codes"]) == (
+        "ineligible",
+        "comparison_only",
+    )
+
+
+def test_comparison_reports_h3_mean_and_median_spreads_and_conservative_status():
+    """Fails if comparison arms are reversed or either required spread is ignored."""
+    summaries = (
+        {"theory_id": "positive", "block_id": "all", "token_equal_mean_base_objective_pct": 3.5, "event_median_base_objective_pct": 2.0},
+        {"theory_id": "reference", "block_id": "all", "token_equal_mean_base_objective_pct": 1.0, "event_median_base_objective_pct": 2.5},
+    )
+    result = build_comparison_results(
+        summaries,
+        (ComparisonSpec("holder-breadth-incremental-v1", "positive", "reference"),),
+    )
+    assert result == ({
+        "comparison_id": "holder-breadth-incremental-v1",
+        "positive_arm_theory_id": "positive",
+        "reference_arm_theory_id": "reference",
+        "token_equal_mean_base_spread_pct": pytest.approx(2.5),
+        "event_median_base_spread_pct": pytest.approx(-0.5),
+        "comparison_status": "does_not_advance",
+        "reason_codes": "nonpositive_event_median_spread",
+    },)
+
+    missing = ({**summaries[0], "event_median_base_objective_pct": None}, summaries[1])
+    assert build_comparison_results(
+        missing,
+        (ComparisonSpec("holder-breadth-incremental-v1", "positive", "reference"),),
+    )[0]["comparison_status"] == "insufficient_evidence"
+
+    advancing = (
+        {**summaries[0], "event_median_base_objective_pct": 3.0},
+        summaries[1],
+    )
+    advanced = build_comparison_results(
+        advancing,
+        (ComparisonSpec("holder-breadth-incremental-v1", "positive", "reference"),),
+    )[0]
+    assert advanced["comparison_status"] == "advances_for_paper_discovery"
+    assert advanced["token_equal_mean_base_spread_pct"] == pytest.approx(2.5)
+    assert advanced["event_median_base_spread_pct"] == pytest.approx(0.5)
+    assert advanced["reason_codes"] == ""
+
+
+def _eligible_summary(theory_id: str, role: str, score: float = 2.0) -> dict:
+    return {
+        "evaluation_id": "e",
+        "theory_id": theory_id,
+        "theory_role": role,
+        "block_id": "all",
+        "event_count": 6,
+        "token_count": 3,
+        "token_equal_mean_base_objective_pct": score,
+        "gate_status": "eligible",
+        "gate_reason_codes": "",
+    }
+
+
+def test_entry_gate_selects_only_best_eligible_theory_with_lexical_tie_break():
+    """Fails if ties are input-order dependent or more than one entry is selected."""
+    theories = tuple(
+        TheorySpec(theory_id, "entry", "positive_return", 4, _entry_theory().predicates)
+        for theory_id in ("entry-b-v1", "entry-a-v1")
+    )
+    selection = build_paper_selection(
+        _summary_bundle(theories=theories),
+        (_eligible_summary("entry-b-v1", "entry"), _eligible_summary("entry-a-v1", "entry")),
+        (),
+    )
+    assert selection["selected_entry_theory_id"] == "entry-a-v1"
+    assert selection["selection_status"] == "selected_for_paper_discovery"
+    assert [item["id"] for item in selection["selected_theories"]] == ["entry-a-v1"]
+
+
+def test_no_eligible_entry_does_not_force_a_winner_or_an_unpaired_veto():
+    """Fails if missing metrics force a candidate or permit a standalone veto."""
+    theories = (_entry_theory(), _veto_theory())
+    entry = {**_eligible_summary("entry-v1", "entry"), "gate_status": "ineligible", "token_equal_mean_base_objective_pct": None}
+    selection = build_paper_selection(
+        _summary_bundle(theories=theories),
+        (entry, _eligible_summary("veto-v1", "veto")),
+        (),
+    )
+    assert selection["selected_entry_theory_id"] is None
+    assert selection["selected_veto_theory_id"] is None
+    assert selection["selection_status"] == "no_paper_strategy_selected"
+    assert next(item for item in selection["unselected_theories"] if item["id"] == "veto-v1")["reason_codes"] == ["requires_selected_entry"]
+
+
+def test_paper_selection_preserves_manifest_definitions_policies_and_blocked_reasons():
+    """Fails if the paper artifact invents strategy inputs or loses evidence limitations."""
+    entry = TheorySpec(
+        "entry-v1",
+        "entry",
+        "positive_return",
+        4,
+        (Predicate("market_phase_4h", "in", ("markup", "accumulation_divergence"), 0),),
+    )
+    veto = _veto_theory()
+    blocked = (BlockedTheorySpec("h5", "missing point-in-time inputs", ("buyer_breadth", "exchange_flow")),)
+    selection = build_paper_selection(
+        _summary_bundle(theories=(entry, veto), blocked=blocked),
+        (_eligible_summary("entry-v1", "entry", 3), _eligible_summary("veto-v1", "veto", 2)),
+        (),
+    )
+    assert selection["mode"] == "paper_only"
+    assert selection["source"] == {
+        "signal_experiment_id": "signal-source",
+        "point_in_time_guarantee": "unknown",
+        "evidence_status": "discovery",
+    }
+    assert selection["warning"] == "Unvalidated discovery shortlist for prospective paper testing only."
+    assert selection["selected_entry_theory_id"] == "entry-v1"
+    assert selection["selected_veto_theory_id"] == "veto-v1"
+    assert selection["selected_theories"] == [
+        _theory_record(entry),
+        _theory_record(veto),
+    ]
+    assert selection["evaluation_execution"] == _summary_bundle().manifest["execution"]
+    assert selection["paper_execution_policy"] == {
+        "signal_time": "max(bucket_end, provider_available_at)",
+        "minimum_quote_delay_minutes": 5,
+        "maximum_quote_age_seconds": 60,
+        "fixed_exit_hours": 4,
+        "non_overlap": "one_open_episode_per_token",
+        "virtual_notional_usd": "min(1000, 0.001 * point_in_time_liquidity_usd)",
+        "unfilled_conditions": ["missing_route", "one_way_quoted_cost_above_2_5_pct"],
+        "recorded_costs": ["fee", "gas", "spread", "slippage"],
+        "real_execution_enabled": False,
+    }
+    assert selection["prospective_advancement_gates"] == _summary_bundle().manifest["prospective_advancement_gates"]
+    assert selection["blocked_theories"] == [{
+        "id": "h5",
+        "reason": "missing point-in-time inputs",
+        "missing_roles": ["buyer_breadth", "exchange_flow"],
+    }]
+
+    forbidden = ("order", "wallet", "account", "venue", "credential", "submit", "live_trade")
+
+    def visit(value):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                assert not any(marker in key.lower() for marker in forbidden)
+                visit(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                visit(nested)
+
+    visit(selection)
+
+
+def test_build_evaluation_runs_the_real_frozen_lineage_offline(tmp_path):
+    """Fails if orchestration skips an evaluation stage or cannot rebuild the source rows."""
+    path, _ = _bundle(tmp_path)
+    bundle = load_evaluation_manifest(path)
+    tables = build_evaluation(bundle)
+    assert isinstance(tables, EvaluationTables)
+    assert tables.events
+    assert tables.summaries == build_theory_summaries(tables.events, bundle)
+    assert tables.comparisons == ()
+    assert tables.paper_selection["mode"] == "paper_only"

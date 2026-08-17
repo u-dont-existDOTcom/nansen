@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import copy
 import json
 import math
 import os
+import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .experiment import SignalBundle, load_signal_manifest, sha256_file, signal_fieldnames
+from .experiment import (
+    SignalBundle,
+    build_analysis,
+    build_signal_analysis,
+    load_signal_manifest,
+    sha256_file,
+    signal_fieldnames,
+)
 
 
 class EvaluationError(RuntimeError):
@@ -74,6 +83,14 @@ class EvaluationBundle:
     @property
     def experiment_id(self) -> str:
         return str(self.manifest["experiment_id"])
+
+
+@dataclass(frozen=True)
+class EvaluationTables:
+    events: tuple[dict[str, Any], ...]
+    summaries: tuple[dict[str, Any], ...]
+    comparisons: tuple[dict[str, Any], ...]
+    paper_selection: dict[str, Any]
 
 
 _TOP_LEVEL_KEYS = {
@@ -687,3 +704,422 @@ def build_theory_events(
             )
             next_allowed[identity] = exit_at
     return tuple(events)
+
+
+_SUMMARY_METRICS = (
+    "event_mean_gross_objective_pct",
+    "event_median_gross_objective_pct",
+    "event_mean_base_objective_pct",
+    "event_median_base_objective_pct",
+    "event_mean_stress_objective_pct",
+    "event_median_stress_objective_pct",
+    "event_win_rate_base",
+    "token_equal_mean_gross_objective_pct",
+    "token_equal_mean_base_objective_pct",
+    "token_equal_mean_stress_objective_pct",
+    "max_token_positive_pnl_contribution",
+)
+
+
+def _numeric_values(
+    rows: tuple[dict[str, Any], ...], field: str
+) -> tuple[float, ...] | None:
+    values: list[float] = []
+    for row in rows:
+        value = row.get(field)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        number = float(value)
+        if not math.isfinite(number):
+            return None
+        values.append(number)
+    return tuple(values)
+
+
+def _token_equal_mean(
+    rows: tuple[dict[str, Any], ...], field: str
+) -> float | None:
+    token_values: dict[tuple[str, str], list[float]] = {}
+    for row in rows:
+        values = _numeric_values((row,), field)
+        if values is None:
+            return None
+        identity = _normalized_identity(row.get("chain"), row.get("token_address"))
+        token_values.setdefault(identity, []).append(values[0])
+    if not token_values:
+        return None
+    return statistics.fmean(
+        statistics.fmean(values) for _, values in sorted(token_values.items())
+    )
+
+
+def _positive_contribution(rows: tuple[dict[str, Any], ...]) -> float | None:
+    positive_by_token: dict[tuple[str, str], float] = {}
+    for row in rows:
+        values = _numeric_values((row,), "base_objective_pct")
+        if values is None:
+            return None
+        identity = _normalized_identity(row.get("chain"), row.get("token_address"))
+        positive_by_token[identity] = positive_by_token.get(identity, 0.0) + max(
+            values[0], 0.0
+        )
+    total = sum(positive_by_token.values())
+    if total <= 0:
+        return None
+    return max(positive_by_token.values()) / total
+
+
+def _summary_metrics(rows: tuple[dict[str, Any], ...]) -> dict[str, float | None]:
+    if not rows:
+        return {field: None for field in _SUMMARY_METRICS}
+    gross = _numeric_values(rows, "gross_objective_pct")
+    base = _numeric_values(rows, "base_objective_pct")
+    stress = _numeric_values(rows, "stress_objective_pct")
+    return {
+        "event_mean_gross_objective_pct": None if gross is None else statistics.fmean(gross),
+        "event_median_gross_objective_pct": None if gross is None else statistics.median(gross),
+        "event_mean_base_objective_pct": None if base is None else statistics.fmean(base),
+        "event_median_base_objective_pct": None if base is None else statistics.median(base),
+        "event_mean_stress_objective_pct": None if stress is None else statistics.fmean(stress),
+        "event_median_stress_objective_pct": None if stress is None else statistics.median(stress),
+        "event_win_rate_base": None
+        if base is None
+        else sum(value > 0 for value in base) / len(base),
+        "token_equal_mean_gross_objective_pct": _token_equal_mean(
+            rows, "gross_objective_pct"
+        ),
+        "token_equal_mean_base_objective_pct": _token_equal_mean(
+            rows, "base_objective_pct"
+        ),
+        "token_equal_mean_stress_objective_pct": _token_equal_mean(
+            rows, "stress_objective_pct"
+        ),
+        "max_token_positive_pnl_contribution": _positive_contribution(rows),
+    }
+
+
+def _positive_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value > 0
+    )
+
+
+def _gate_result(
+    theory: TheorySpec,
+    row: dict[str, Any],
+    *,
+    positive_blocks: int,
+    gates: dict[str, Any],
+) -> tuple[str, str]:
+    if theory.role == "reference":
+        return "ineligible", "benchmark_only"
+    if theory.role == "comparison":
+        return "ineligible", "comparison_only"
+    reasons: list[str] = []
+    if theory.role == "entry":
+        if row["event_count"] < gates["entry_min_events"]:
+            reasons.append("insufficient_events")
+        if row["token_count"] < gates["entry_min_tokens"]:
+            reasons.append("insufficient_tokens")
+        if not _positive_number(row["token_equal_mean_base_objective_pct"]):
+            reasons.append("nonpositive_token_equal_mean_base")
+        if not _positive_number(row["event_median_base_objective_pct"]):
+            reasons.append("nonpositive_event_median_base")
+        if positive_blocks < gates["entry_min_positive_blocks"]:
+            reasons.append("insufficient_positive_blocks")
+    elif theory.role == "veto":
+        if row["event_count"] < gates["veto_min_events"]:
+            reasons.append("insufficient_events")
+        if row["token_count"] < gates["veto_min_tokens"]:
+            reasons.append("insufficient_tokens")
+        if not _positive_number(row["token_equal_mean_base_objective_pct"]):
+            reasons.append("nonpositive_token_equal_mean_base")
+        if not _positive_number(row["event_median_base_objective_pct"]):
+            reasons.append("nonpositive_event_median_base")
+    else:
+        reasons.append("unsupported_role")
+    ordered = ";".join(sorted(reasons))
+    return ("eligible", "") if not reasons else ("ineligible", ordered)
+
+
+def _summarize_group(
+    evaluation_id: str,
+    theory: TheorySpec,
+    block_id: str,
+    rows: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    token_ids = {
+        _normalized_identity(row.get("chain"), row.get("token_address"))
+        for row in rows
+    }
+    return {
+        "evaluation_id": evaluation_id,
+        "theory_id": theory.id,
+        "theory_role": theory.role,
+        "block_id": block_id,
+        "event_count": len(rows),
+        "token_count": len(token_ids),
+        **_summary_metrics(rows),
+        "gate_status": "not_applicable",
+        "gate_reason_codes": "",
+    }
+
+
+def build_theory_summaries(
+    events: tuple[dict[str, Any], ...],
+    bundle: EvaluationBundle,
+) -> tuple[dict[str, Any], ...]:
+    summaries: list[dict[str, Any]] = []
+    for theory in sorted(bundle.theories, key=lambda item: item.id):
+        theory_rows = tuple(row for row in events if row.get("theory_id") == theory.id)
+        block_rows = [
+            _summarize_group(
+                bundle.experiment_id,
+                theory,
+                block.id,
+                tuple(row for row in theory_rows if row.get("block_id") == block.id),
+            )
+            for block in bundle.blocks
+        ]
+        overall = _summarize_group(bundle.experiment_id, theory, "all", theory_rows)
+        positive_blocks = sum(
+            _positive_number(row["token_equal_mean_base_objective_pct"])
+            for row in block_rows
+            if row["event_count"] > 0
+        )
+        status, reasons = _gate_result(
+            theory,
+            overall,
+            positive_blocks=positive_blocks,
+            gates=bundle.manifest["paper_feasibility_gates"],
+        )
+        overall["gate_status"] = status
+        overall["gate_reason_codes"] = reasons
+        summaries.extend((overall, *block_rows))
+    return tuple(summaries)
+
+
+def _comparison_row(
+    comparison: ComparisonSpec,
+    positive: dict[str, Any],
+    reference: dict[str, Any],
+) -> dict[str, Any]:
+    mean_values = (
+        positive.get("token_equal_mean_base_objective_pct"),
+        reference.get("token_equal_mean_base_objective_pct"),
+    )
+    median_values = (
+        positive.get("event_median_base_objective_pct"),
+        reference.get("event_median_base_objective_pct"),
+    )
+    mean_spread = (
+        mean_values[0] - mean_values[1]
+        if all(_finite_nonboolean_number(value) for value in mean_values)
+        else None
+    )
+    median_spread = (
+        median_values[0] - median_values[1]
+        if all(_finite_nonboolean_number(value) for value in median_values)
+        else None
+    )
+    reasons: list[str] = []
+    if mean_spread is None:
+        reasons.append("missing_token_equal_mean_base_spread")
+    elif mean_spread <= 0:
+        reasons.append("nonpositive_token_equal_mean_base_spread")
+    if median_spread is None:
+        reasons.append("missing_event_median_base_spread")
+    elif median_spread <= 0:
+        reasons.append("nonpositive_event_median_spread")
+    if mean_spread is None or median_spread is None:
+        status = "insufficient_evidence"
+    elif reasons:
+        status = "does_not_advance"
+    else:
+        status = "advances_for_paper_discovery"
+    return {
+        "comparison_id": comparison.id,
+        "positive_arm_theory_id": comparison.positive_arm,
+        "reference_arm_theory_id": comparison.reference_arm,
+        "token_equal_mean_base_spread_pct": mean_spread,
+        "event_median_base_spread_pct": median_spread,
+        "comparison_status": status,
+        "reason_codes": ";".join(sorted(reasons)),
+    }
+
+
+def build_comparison_results(
+    summaries: tuple[dict[str, Any], ...],
+    comparisons: tuple[ComparisonSpec, ...],
+) -> tuple[dict[str, Any], ...]:
+    overall = {
+        (row.get("theory_id"), row.get("block_id")): row for row in summaries
+    }
+    results: list[dict[str, Any]] = []
+    for comparison in sorted(comparisons, key=lambda item: item.id):
+        positive = overall.get((comparison.positive_arm, "all"), {})
+        reference = overall.get((comparison.reference_arm, "all"), {})
+        results.append(_comparison_row(comparison, positive, reference))
+    return tuple(results)
+
+
+_PAPER_EXECUTION_POLICY = {
+    "signal_time": "max(bucket_end, provider_available_at)",
+    "minimum_quote_delay_minutes": 5,
+    "maximum_quote_age_seconds": 60,
+    "fixed_exit_hours": 4,
+    "non_overlap": "one_open_episode_per_token",
+    "virtual_notional_usd": "min(1000, 0.001 * point_in_time_liquidity_usd)",
+    "unfilled_conditions": ["missing_route", "one_way_quoted_cost_above_2_5_pct"],
+    "recorded_costs": ["fee", "gas", "spread", "slippage"],
+    "real_execution_enabled": False,
+}
+
+
+def _reason_list(row: dict[str, Any]) -> list[str]:
+    raw = row.get("gate_reason_codes")
+    if not isinstance(raw, str):
+        return ["missing_gate_evidence"]
+    return [item for item in raw.split(";") if item]
+
+
+def _manifest_theory(bundle: EvaluationBundle, theory_id: str) -> dict[str, Any]:
+    record = next(
+        item for item in bundle.manifest["theories"] if item["id"] == theory_id
+    )
+    return copy.deepcopy(record)
+
+
+def build_paper_selection(
+    bundle: EvaluationBundle,
+    summaries: tuple[dict[str, Any], ...],
+    comparisons: tuple[dict[str, Any], ...],
+) -> dict[str, Any]:
+    overall = {
+        row.get("theory_id"): row
+        for row in summaries
+        if row.get("block_id") == "all"
+    }
+    entry_candidates = sorted(
+        (
+            row
+            for row in overall.values()
+            if row.get("theory_role") == "entry"
+            and row.get("gate_status") == "eligible"
+            and _finite_nonboolean_number(
+                row.get("token_equal_mean_base_objective_pct")
+            )
+        ),
+        key=lambda row: (
+            -float(row["token_equal_mean_base_objective_pct"]),
+            str(row["theory_id"]),
+        ),
+    )
+    selected_entry = None if not entry_candidates else str(entry_candidates[0]["theory_id"])
+    veto_candidates = sorted(
+        (
+            row
+            for row in overall.values()
+            if row.get("theory_role") == "veto"
+            and row.get("gate_status") == "eligible"
+            and _finite_nonboolean_number(
+                row.get("token_equal_mean_base_objective_pct")
+            )
+        ),
+        key=lambda row: (
+            -float(row["token_equal_mean_base_objective_pct"]),
+            str(row["theory_id"]),
+        ),
+    )
+    selected_veto = (
+        None
+        if selected_entry is None or not veto_candidates
+        else str(veto_candidates[0]["theory_id"])
+    )
+    selected_ids = [
+        theory_id
+        for theory_id in (selected_entry, selected_veto)
+        if theory_id is not None
+    ]
+    unselected: list[dict[str, Any]] = []
+    for theory in sorted(bundle.theories, key=lambda item: item.id):
+        if theory.id in selected_ids:
+            continue
+        row = overall.get(theory.id, {})
+        if theory.role == "reference":
+            reasons = ["benchmark_only"]
+        elif theory.role == "comparison":
+            reasons = ["comparison_only"]
+        elif theory.role == "veto" and selected_entry is None and row.get("gate_status") == "eligible":
+            reasons = ["requires_selected_entry"]
+        elif row.get("gate_status") == "eligible":
+            reasons = [
+                "lower_ranked_eligible_veto"
+                if theory.role == "veto"
+                else "lower_ranked_eligible_entry"
+            ]
+        else:
+            reasons = _reason_list(row)
+        unselected.append(
+            {"id": theory.id, "role": theory.role, "reason_codes": sorted(reasons)}
+        )
+    source_manifest = bundle.source_bundle.manifest
+    return {
+        "evaluation_id": bundle.experiment_id,
+        "mode": "paper_only",
+        "source": {
+            "signal_experiment_id": source_manifest["experiment_id"],
+            "point_in_time_guarantee": source_manifest["point_in_time_guarantee"],
+            "evidence_status": bundle.manifest["status"],
+        },
+        "selection_status": (
+            "selected_for_paper_discovery"
+            if selected_entry is not None
+            else "no_paper_strategy_selected"
+        ),
+        "warning": "Unvalidated discovery shortlist for prospective paper testing only.",
+        "selected_entry_theory_id": selected_entry,
+        "selected_veto_theory_id": selected_veto,
+        "selected_theories": [
+            _manifest_theory(bundle, theory_id) for theory_id in selected_ids
+        ],
+        "unselected_theories": unselected,
+        "blocked_theories": [
+            {
+                "id": item.id,
+                "reason": item.reason,
+                "missing_roles": list(item.missing_roles),
+            }
+            for item in sorted(bundle.blocked_theories, key=lambda item: item.id)
+        ],
+        "comparisons": [copy.deepcopy(item) for item in comparisons],
+        "evaluation_execution": copy.deepcopy(bundle.manifest["execution"]),
+        "paper_execution_policy": copy.deepcopy(_PAPER_EXECUTION_POLICY),
+        "prospective_advancement_gates": copy.deepcopy(
+            bundle.manifest["prospective_advancement_gates"]
+        ),
+    }
+
+
+def build_evaluation(bundle: EvaluationBundle) -> EvaluationTables:
+    signal_rows = build_signal_analysis(bundle.source_bundle)
+    source_rows = build_analysis(bundle.source_bundle.source_bundle).hourly_features
+    evaluation_window = bundle.manifest["evaluation_window"]
+    events = build_theory_events(
+        signal_rows,
+        source_rows,
+        bundle.theories,
+        evaluation_id=bundle.experiment_id,
+        evaluation_start=_parse_utc(evaluation_window["from"]),
+        evaluation_end=_parse_utc(evaluation_window["to"]),
+        blocks=bundle.blocks,
+        entry_lag_hours=bundle.manifest["execution"]["entry_lag_hours"],
+        costs=bundle.costs,
+    )
+    summaries = build_theory_summaries(events, bundle)
+    comparisons = build_comparison_results(summaries, bundle.comparisons)
+    paper_selection = build_paper_selection(bundle, summaries, comparisons)
+    return EvaluationTables(events, summaries, comparisons, paper_selection)
