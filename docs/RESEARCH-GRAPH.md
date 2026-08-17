@@ -26,6 +26,31 @@ flowchart LR
     obs_momentum_participation --> lim_selected_endpoint_window
     obs_toad_no_reversal --> lim_selected_endpoint_window
     obs_cate_mixed --> lim_selected_endpoint_window
+
+    src_nansen_cli_builds["Source: Nansen CLI Builds community catalog"]
+    src_nansen_divergence["Source lead: Nansen Divergence"]
+    src_smrr["Source lead: Smart Money Rotation Radar (no declared license)"]
+    lead_supply_control["Lead: exchange withdrawal / supply control"]
+    lead_four_hour_rotation["Lead: four-hour rotation cadence"]
+    hyp_persistence_acceleration["Hypothesis: persistence and acceleration may describe regimes"]
+    hyp_buyer_breadth["Hypothesis: wallet-level buyer breadth may add evidence"]
+    hyp_exchange_outflow_confirmation["Hypothesis: labelled exchange outflow may confirm co-movement"]
+    req_point_in_time_state["Requirement: point-in-time state, liquidity, and execution evidence"]
+    exp_20260816_community_signal_shadow["Experiment: 2026-08-16 community-signal shadow (discovery)"]
+
+    src_nansen_cli_builds -->|inspired_by| lead_supply_control
+    src_nansen_cli_builds -->|inspired_by| lead_four_hour_rotation
+    src_nansen_divergence -->|inspired_by| hyp_persistence_acceleration
+    src_smrr -->|inspired_by| hyp_buyer_breadth
+    src_smrr -->|inspired_by| hyp_exchange_outflow_confirmation
+    lead_supply_control -->|not_yet_replicated| hyp_exchange_outflow_confirmation
+    lead_four_hour_rotation -->|not_yet_replicated| hyp_persistence_acceleration
+    hyp_persistence_acceleration -->|tests| exp_20260816_community_signal_shadow
+    hyp_buyer_breadth -->|tests| exp_20260816_community_signal_shadow
+    hyp_exchange_outflow_confirmation -->|tests| exp_20260816_community_signal_shadow
+    exp_20260816_community_signal_shadow -->|blocked_by| req_point_in_time_state
+    req_point_in_time_state -->|requires| hyp_buyer_breadth
+    req_point_in_time_state -->|requires| hyp_exchange_outflow_confirmation
 ```
 
 Observation evidence:
@@ -35,5 +60,8 @@ Observation evidence:
 - [`obs_momentum_participation`](../research/experiments/2026-08-16-seven-token-pilot/REPORT.md#event-weighted-timing-analysis)
 - [`obs_toad_no_reversal`](../research/experiments/2026-08-16-seven-token-pilot/REPORT.md#event-weighted-timing-analysis)
 - [`obs_cate_mixed`](../research/experiments/2026-08-16-seven-token-pilot/REPORT.md#event-weighted-timing-analysis)
+- [`src_nansen_cli_builds`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — community claims are leads only.
+- [`src_nansen_divergence`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — provenance link; no community claim is treated as validated.
+- [`src_smrr`](https://release.nansen.ai/en/help/articles/6399546-nansen-cli-builds) — provenance link; no code or expression is copied because the referenced repository has no declared license.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

@@ -23,3 +23,24 @@ These are hypotheses, not trading rules. Thresholds must be tuned only on a trai
 
 ## Important API caveat
 Nansen Token Screener currently documents short retention at fine granularity and up to roughly two months for daily data. The serious backtest may therefore need `smart-money/historical-holdings`, per-token `tgm/flows`, external OHLCV, or locally accumulated snapshots rather than pretending Token Screener is an unlimited historical database.
+
+## Versioned community-signal shadow
+
+The `2026-08-16-seven-token-pilot` is frozen schema v1: its raw evidence, manifest, and derived CSV bytes remain unchanged. `2026-08-16-community-signal-shadow` is an opt-in schema-v2 companion that references the v1 manifest hash and writes only `derived/signal-features.csv`. Its trailing features use contiguous completed source buckets and become available at `bucket_end`; it is discovery-only because `point_in_time_guarantee=unknown`.
+
+`holders_count` measures Smart-Money **holder breadth**. It is not buyer breadth. Buyer breadth requires wallet-level buyer evidence from an explicit, complete `who-bought-sold` request. Exchange-labelled flows provide separately labelled co-movement evidence; they do not attribute a transfer between an exchange and Smart Money.
+
+```bash
+# User-invoked collection only; each call can use paid/current API access.
+./nansen-lab who-bought-sold --chain base --token TOKEN_ADDRESS --side BUY \
+  --from 2026-08-16T00:00:00Z --to 2026-08-17T00:00:00Z \
+  --labels Fund "Smart Trader" "30D Smart Trader" --min-volume-usd 1000 --limit 100
+./nansen-lab flows --chain base --token TOKEN_ADDRESS --label exchange --days 7
+```
+
+There are no automatic credit-spending calls: tests, analysis, and documentation do not invoke Nansen. Callers deliberately choose live collection; durable explicit outputs retain exact request provenance and reject accidental overwrite. Run both deterministic checks after a committed-bundle change:
+
+```bash
+./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json --check
+./nansen-lab analyze --manifest research/experiments/2026-08-16-community-signal-shadow/manifest.json --check
+```

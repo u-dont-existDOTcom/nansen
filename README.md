@@ -35,10 +35,15 @@ The bootstrap:
 ./nansen-lab plan --tokens 10
 ./nansen-lab candidates
 ./nansen-lab flows --chain solana --token TOKEN_ADDRESS --days 7
+./nansen-lab flows --chain solana --token TOKEN_ADDRESS --label exchange --days 7
+./nansen-lab who-bought-sold --chain solana --token TOKEN_ADDRESS --side BUY \
+  --from 2026-08-16T00:00:00Z --to 2026-08-17T00:00:00Z
 ```
 
 Identical requests are cached under `data/cache/`. Use `--refresh` only when you deliberately want another paid/current API call.
 Flow responses written to the default ignored `results/` scratch path retain the historical overwrite behavior. An explicit `flows --output PATH` is treated as durable evidence and refuses to replace either the response or its `.request.json` sidecar unless `--force-output` is also supplied. New sidecars distinguish cache hits, original response retrieval time, artifact write time, and the exact response SHA-256. Legacy raw-only cache entries use their file modification time as the retrieval-time fallback instead of claiming a fresh network response.
+
+`who-bought-sold` records wallet-level buyer or seller evidence for an explicit interval, labels, threshold, and page. It is the required source for buyer breadth, subject to complete pagination; `holders_count` is only holder breadth. `flows --label exchange` archives exchange-labelled flow evidence separately from Smart-Money flows. Neither command runs automatically: live/current requests can consume credits only when you explicitly invoke one. A paired exchange flow and Smart-Money flow does not establish transfer attribution.
 
 ## Research architecture
 
@@ -52,7 +57,10 @@ The first public evidence bundle is the [`2026-08-16 seven-token pilot`](researc
 
 ```bash
 ./nansen-lab analyze --manifest research/experiments/2026-08-16-seven-token-pilot/manifest.json --check
+./nansen-lab analyze --manifest research/experiments/2026-08-16-community-signal-shadow/manifest.json --check
 ```
+
+The [`community-signal shadow`](research/experiments/2026-08-16-community-signal-shadow/REPORT.md) is a schema-v2, discovery-only companion derived from the immutable schema-v1 pilot. It uses `bucket_end` as feature availability, contains no fitted score, and cannot be used as a holdout while its point-in-time guarantee is unknown.
 
 `results/` is ignored scratch space for exploratory outputs. Evidence becomes durable only after it is copied byte-for-byte into `research/experiments/`, checksummed in a manifest, documented, and committed. The append-only [`research ledger`](docs/RESEARCH-LEDGER.md) and [`evidence graph`](docs/RESEARCH-GRAPH.md) preserve the experiment's claims, limitations, and follow-up state.
 
