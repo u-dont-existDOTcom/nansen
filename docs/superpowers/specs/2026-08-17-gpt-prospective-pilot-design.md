@@ -62,7 +62,7 @@ The screener request is fixed before collection:
 - chains: `solana`, `ethereum`, `base`, `bnb`, `arbitrum`;
 - timeframe: `24h`;
 - page 1 with `per_page: 1000`;
-- `trader_type: sm`;
+- `only_smart_money: true`;
 - `include_stablecoins: false`;
 - minimum token age: 3 days;
 - minimum market cap: `$1,000,000`;
@@ -152,13 +152,13 @@ The decision seal time is `t0`.
 - Exit observation window: `[entry_window_start + 4 hours, entry_window_start + 4 hours + 5 minutes)`.
 - DEX-trade endpoint: `POST /api/v1/tgm/dex-trades`.
 - Page size: 1000.
-- Stable ordering: `block_timestamp ASC`, then `transaction_hash ASC`.
+- Request ordering: `block_timestamp ASC`; after complete pagination, deterministic local ordering is `block_timestamp ASC`, then `transaction_hash ASC`.
 - Entry side: observed `BUY` trades.
 - Exit side: observed `SELL` trades.
 
 The entry request filters to `action=BUY`; the exit request filters to `action=SELL`. For the entry, chronological observed trades are fractionally accumulated until their estimated USD value reaches the fixed liquidity-aware virtual notional; the corresponding token quantity and value-weighted price form the paper fill. For the exit, chronological sells are accumulated until they cover the entry token quantity. Fractional use of the final observed trade is allowed. Non-finite or non-positive amounts and prices are rejected.
 
-Each window may consume at most two pages. If page 2 is still not the last page, the window is incomplete and the experiment becomes `unscorable`; no partial fill is cherry-picked. If the complete window has insufficient eligible volume, every long decision is `UNFILLED` and receives no return score rather than zero.
+Each window may consume at most two pages. If page 2 is still not the last page, pagination contains duplicates or non-monotonic timestamps, or its boundary cannot be validated, the window is incomplete and the experiment becomes `unscorable`; no partial fill is cherry-picked. If the complete window has insufficient eligible volume, every long decision is `UNFILLED` and receives no return score rather than zero.
 
 One final `tgm/token-ohlcv` request retrieves closed 5-minute candles covering `t0` through the settled exit. It supplies an independent price-path check, MFE/MAE description, volume, and market-cap context. The still-open last candle is excluded. A truncated response or missing required candle makes the outcome `unscorable`.
 
@@ -177,7 +177,7 @@ The ledger reserves:
 7. up to two exit DEX-trade pages;
 8. one settled OHLCV call.
 
-The maximum is ten billable Nansen calls. Every selected endpoint is documented at one credit per call, so the maximum is also ten Nansen credits. Unneeded second pages are not called. Before spending, the process validates both credentials locally, uses Nansen's zero-credit account surface to confirm at least ten credits remain, and checks that the exact OpenAI model is accessible without substituting another model. A failed preflight prevents all billable Nansen calls.
+The maximum is ten billable Nansen calls. Every selected endpoint is documented at one credit per call, so the maximum is also ten Nansen credits. Unneeded second pages are not called. Before spending, the process validates both credentials locally, requires Nansen's account surface to report zero credit cost/use and at least ten remaining credits, and checks that the exact OpenAI model is accessible without substituting another model. A failed preflight prevents all billable Nansen calls.
 
 A persistent budget ledger is updated atomically before and after every request. It records `reserved`, `confirmed_used`, `failed_before_pricing`, or `ambiguous`. An ambiguous request consumes one conservative budget slot. The client refuses a request that could exceed either ceiling.
 
@@ -269,6 +269,13 @@ Tests cover:
 - unchanged schema-v1/v2/v3 hashes and the full existing regression suite.
 
 A zero-credit dry run must reproduce the entire lifecycle from fixtures. The live start command is separate, explicit, and prints the maximum remaining spend before proceeding. The settlement command refuses to run before the recorded deadline.
+
+## Contract references checked 2026-08-17
+
+- Nansen: [Token Screener](https://docs.nansen.ai/api/token-god-mode/token-screener), [Token Information](https://docs.nansen.ai/api/token-god-mode/token-information), [Flow Intelligence](https://docs.nansen.ai/api/token-god-mode/flow-intelligence), [Flows](https://docs.nansen.ai/api/token-god-mode/flows), [DEX Trades](https://docs.nansen.ai/api/token-god-mode/dex-trades), [Price OHLCV](https://docs.nansen.ai/api/token-god-mode/price-ohlcv), and [Credits](https://docs.nansen.ai/getting-started/credits).
+- OpenAI: [model catalog and model capabilities](https://developers.openai.com/api/docs/models).
+
+The implementation pins request payloads in tests and fails closed on contract drift; these links document the live surfaces but do not replace archived request/response evidence.
 
 ## Completion boundary
 
