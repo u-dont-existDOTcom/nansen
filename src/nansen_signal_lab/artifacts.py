@@ -374,12 +374,19 @@ def _write_artifact_transaction_marker(
     _fsync_directory(response_path.parent)
 
 
+def _reject_non_finite_json_constant(constant: str) -> None:
+    raise ValueError(f"non-finite JSON constant: {constant}")
+
+
 def _raw_response_parse_status(raw_response_bytes: bytes) -> str:
     if not raw_response_bytes:
         return "empty"
     try:
-        parsed = json.loads(raw_response_bytes.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        parsed = json.loads(
+            raw_response_bytes.decode("utf-8"),
+            parse_constant=_reject_non_finite_json_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return "non_json"
     return "json_object" if isinstance(parsed, dict) else "json_other"
 

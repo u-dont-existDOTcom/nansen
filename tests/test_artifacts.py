@@ -479,6 +479,9 @@ def test_write_api_artifacts_preserves_exact_raw_response_bytes(tmp_path):
         (b"", "empty"),
         (b'["provider error"]', "json_other"),
         (b'{"error":"provider error"}', "json_object"),
+        (b'{"error":NaN}', "non_json"),
+        (b'{"error":Infinity}', "non_json"),
+        (b'{"error":-Infinity}', "non_json"),
     ],
 )
 def test_write_api_artifacts_archives_raw_error_evidence(tmp_path, raw, status):
