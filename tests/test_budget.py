@@ -75,7 +75,27 @@ def response_artifact(
         / f"attempt-{reservation.attempt_count}-response.json"
     )
     write_bytes_once(path, response.raw_body)
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    metadata_path = path.with_name(
+        f"attempt-{reservation.attempt_count}-response-metadata.json"
+    )
+    write_json_once(metadata_path, {
+        "schema_version": 1,
+        "attempt": reservation.attempt_count,
+        "status_code": response.status_code,
+        "request_started_at": response.request_started_at,
+        "response_retrieved_at": response.response_retrieved_at,
+        "artifact_written_at": response.response_retrieved_at,
+        "response_headers": dict(response.response_headers),
+        "request_id": response.request_id,
+        "credit_cost": response.credit_cost,
+        "credit_used": response.credit_used,
+        "credit_remaining": response.credit_remaining,
+        "credit_header_errors": list(response.credit_header_errors),
+        "body_parse_status": response.body_parse_status,
+        "response_file": path.name,
+        "response_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    })
+    return hashlib.sha256(metadata_path.read_bytes()).hexdigest()
 
 
 def establish_account_baseline(guard: BudgetGuard, remaining: int = 10) -> None:
@@ -86,6 +106,30 @@ def establish_account_baseline(guard: BudgetGuard, remaining: int = 10) -> None:
         response,
         response_artifact_sha256=response_artifact(guard, reservation, response),
     )
+
+
+def test_confirm_refuses_changed_response_metadata_even_when_raw_bytes_match(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    reservation = guard.reserve("account", request_hash(0), "account", 1)
+    response = evidence(cost=0, used=0, remaining=10)
+    response_sha256 = response_artifact(guard, reservation, response)
+    metadata_path = (
+        tmp_path
+        / "raw/nansen"
+        / reservation.reservation_id
+        / "attempt-1-response-metadata.json"
+    )
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(
+        '{"credit_cost":1,"credit_remaining":9,"credit_used":1}\n'
+    )
+
+    with pytest.raises(BudgetError, match="response evidence"):
+        guard.confirm(
+            reservation,
+            response,
+            response_artifact_sha256=response_sha256,
+        )
 
 
 def test_initial_head_is_exact_canonical_budget_document(tmp_path):

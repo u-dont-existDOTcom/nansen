@@ -280,6 +280,25 @@ def test_normalization_rejects_space_separated_bucket_end_timestamp():
         )
 
 
+def test_normalization_rejects_duplicate_or_nonmonotonic_exchange_rows():
+    snapshot = _snapshot_module()
+    available_at = datetime(2026, 8, 17, 10, tzinfo=timezone.utc)
+    valid = [_flow_row(hour) for hour in range(13)]
+    for exchange in (
+        [*valid, dict(valid[-1])],
+        [*valid[:-2], valid[-1], valid[-2]],
+    ):
+        with pytest.raises(snapshot.SnapshotError, match="strictly increasing"):
+            snapshot.normalize_snapshot(
+                _selection(snapshot),
+                {"data": {}},
+                {"data": {}},
+                _final_flow_body(valid),
+                _final_flow_body(exchange),
+                available_at=available_at,
+            )
+
+
 def test_normalization_preserves_gap_as_unavailable_and_ignores_token_info_liquidity():
     snapshot = _snapshot_module()
     available_at = datetime(2026, 8, 17, 10, tzinfo=timezone.utc)

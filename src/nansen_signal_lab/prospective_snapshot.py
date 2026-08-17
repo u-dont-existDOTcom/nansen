@@ -281,14 +281,20 @@ def _validate_final_flow_response(body: Any, *, label: str, available_at: dateti
     ):
         raise SnapshotError(f"{label} flow response must declare is_last_page=true")
     validated = []
+    previous_key: tuple[datetime, datetime] | None = None
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             raise SnapshotError(f"{label} flow row {index} must be an object")
         if row.get("is_complete") is not True:
             raise SnapshotError(f"{label} flow row {index} must declare is_complete=true")
+        date = _timestamp(row.get("date"), field=f"{label} flow row {index} date")
         bucket_end = _timestamp(row.get("bucket_end"), field=f"{label} flow row {index} bucket_end")
         if bucket_end > available_at:
             raise SnapshotError(f"{label} flow row {index} bucket_end exceeds available_at")
+        key = (bucket_end, date)
+        if previous_key is not None and key <= previous_key:
+            raise SnapshotError(f"{label} flow rows must be strictly increasing")
+        previous_key = key
         validated.append(dict(row))
     return tuple(validated)
 

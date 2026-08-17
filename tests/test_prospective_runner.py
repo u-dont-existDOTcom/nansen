@@ -765,3 +765,116 @@ def test_decision_t0_cannot_precede_provider_or_durable_evidence_time(tmp_path):
             bundle,
             (artifact,),
         )
+
+
+def test_start_reuses_frozen_snapshot_cutoff_after_predecision_interruption(
+    tmp_path, monkeypatch
+):
+    from src.nansen_signal_lab import prospective_runner
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot, start_pilot
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/resume-predecision-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+    )
+    nansen = FakeNansen()
+    openai = FakeOpenAI()
+    original_normalize = prospective_runner.normalize_snapshot
+
+    def interrupt_after_predecision(*_args, **_kwargs):
+        raise KeyboardInterrupt("fixture interruption after predecision responses")
+
+    monkeypatch.setattr(
+        prospective_runner, "normalize_snapshot", interrupt_after_predecision
+    )
+    with pytest.raises(KeyboardInterrupt, match="after predecision responses"):
+        start_pilot(
+            bundle,
+            nansen=nansen,
+            openai=openai,
+            clock=lambda: datetime(2026, 8, 17, 10, 37, tzinfo=timezone.utc),
+            sleep=lambda _seconds: None,
+        )
+    paid_calls = [call for call in nansen.calls if call[0] != "OPENAPI"]
+    assert len(paid_calls) == 6
+
+    monkeypatch.setattr(prospective_runner, "normalize_snapshot", original_normalize)
+    resumed = start_pilot(
+        prospective_runner.load_prospective_manifest(bundle.manifest_path),
+        nansen=nansen,
+        openai=openai,
+        clock=lambda: datetime(2026, 8, 17, 10, 42, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+    assert resumed.manifest["stage"] == "decision_sealed"
+    assert [call for call in nansen.calls if call[0] != "OPENAPI"] == paid_calls
+
+
+def test_terminal_report_interruption_adopts_first_reason_without_more_http(
+    tmp_path, monkeypatch
+):
+    from dataclasses import replace
+    from src.nansen_signal_lab import prospective_runner
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot, start_pilot
+
+    class PaidAccount(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            if endpoint != "account":
+                return response
+            self.remaining = 9
+            body = {"plan": "pro", "credits_remaining": 9}
+            raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+            headers = dict(response.response_headers)
+            headers.update({
+                "X-Nansen-Credits-Cost": "1",
+                "X-Nansen-Credits-Used": "1",
+                "X-Nansen-Credits-Remaining": "9",
+            })
+            return replace(
+                response,
+                body=body,
+                raw_body=raw,
+                response_headers=headers,
+                credit_cost=1,
+                credit_used=1,
+                credit_remaining=9,
+            )
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/resume-terminal-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+    )
+    nansen = PaidAccount()
+    openai = FakeOpenAI()
+    original_commit = prospective_runner.commit_stage
+
+    def interrupt_terminal(current, target, *args, **kwargs):
+        if target == "unscorable":
+            raise KeyboardInterrupt("fixture interruption after terminal report")
+        return original_commit(current, target, *args, **kwargs)
+
+    monkeypatch.setattr(prospective_runner, "commit_stage", interrupt_terminal)
+    with pytest.raises(KeyboardInterrupt, match="after terminal report"):
+        start_pilot(
+            bundle,
+            nansen=nansen,
+            openai=openai,
+            clock=lambda: datetime(2026, 8, 17, 10, 37, tzinfo=timezone.utc),
+            sleep=lambda _seconds: None,
+        )
+    assert (bundle.root / "REPORT.md").is_file()
+    calls = list(nansen.calls)
+
+    monkeypatch.setattr(prospective_runner, "commit_stage", original_commit)
+    final = start_pilot(
+        prospective_runner.load_prospective_manifest(bundle.manifest_path),
+        nansen=nansen,
+        openai=openai,
+        clock=lambda: datetime(2026, 8, 17, 10, 38, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+    assert final.manifest["stage"] == "unscorable"
+    assert nansen.calls == calls

@@ -658,8 +658,6 @@ git commit -m "Score prospective observed paper fills"
 - Modify: `src/nansen_signal_lab/cli.py`
 - Create: `tests/test_prospective_runner.py`
 - Modify: `tests/test_cli.py`
-- Create: `tests/fixtures/prospective-pilot/nansen/*.json`
-- Create: `tests/fixtures/prospective-pilot/openai/*.json`
 
 **Interfaces:**
 - Consumes: every interface from Tasks 1–7.
@@ -672,7 +670,7 @@ git commit -m "Score prospective observed paper fills"
 
 - [ ] **Step 1: Write end-to-end fake-adapter tests**
 
-Create deterministic fixture responses for one eligible candidate, four pre-decision evidence calls, two valid GPT passes, one-page entry/exit windows, and settled OHLCV. Use a fake clock at fixed UTC times. Assert:
+Create deterministic in-test fake-adapter responses for one eligible candidate, four pre-decision evidence calls, two valid GPT passes, one-page entry/exit windows, and settled OHLCV. Use a fake clock at fixed UTC times. Assert:
 
 ```python
 assert billable_calls == [
@@ -822,7 +820,7 @@ git commit -m "Preregister prospective GPT pilot"
 
 - [ ] **Step 7: Run an independent whole-branch review before spending**
 
-Give a fresh reviewer the design, plan, base commit `7906b53`, final implementation commit, and these independent questions:
+Give a fresh reviewer the design, plan, planning checkpoint `402042d`, final implementation commit, and these independent questions:
 
 - Can any outcome, identity, prior result, or model tool leak into either GPT pass?
 - Can any code path exceed ten calls/credits or retry an ambiguous transmission?

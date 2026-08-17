@@ -85,6 +85,23 @@ _REQUEST_ARTIFACT_KEYS = {
     "artifact_written_at",
     "transmission_may_begin",
 }
+_RESPONSE_METADATA_KEYS = {
+    "schema_version",
+    "attempt",
+    "status_code",
+    "request_started_at",
+    "response_retrieved_at",
+    "artifact_written_at",
+    "response_headers",
+    "request_id",
+    "credit_cost",
+    "credit_used",
+    "credit_remaining",
+    "credit_header_errors",
+    "body_parse_status",
+    "response_file",
+    "response_sha256",
+}
 
 
 def _normalized_endpoint(endpoint: str) -> str:
@@ -628,17 +645,89 @@ class BudgetGuard:
             )
 
     def _verify_response_artifact(
-        self, reservation: BudgetReservation, response_artifact_sha256: str
+        self,
+        reservation: BudgetReservation,
+        response_artifact_sha256: str,
+        response: NansenEvidenceResponse | None = None,
     ) -> None:
-        path = self._artifact_path(reservation, "response")
+        path = self._artifact_path(reservation, "response-metadata")
         if (
             not path.is_file()
             or hashlib.sha256(path.read_bytes()).hexdigest()
             != response_artifact_sha256
         ):
             raise BudgetError(
-                "response artifact is missing or does not match its SHA-256"
+                "response evidence artifact is missing or does not match its SHA-256"
             )
+        try:
+            raw_metadata = path.read_bytes()
+            metadata = json.loads(raw_metadata)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise BudgetError("response evidence metadata is unreadable") from exc
+        body_path = self._artifact_path(reservation, "response")
+        if (
+            not isinstance(metadata, dict)
+            or set(metadata) != _RESPONSE_METADATA_KEYS
+            or canonical_json_bytes(metadata) != raw_metadata
+            or metadata.get("schema_version") != 1
+            or metadata.get("attempt") != reservation.attempt_count
+            or metadata.get("response_file") != body_path.name
+            or not body_path.is_file()
+            or metadata.get("response_sha256")
+            != hashlib.sha256(body_path.read_bytes()).hexdigest()
+            or isinstance(metadata.get("status_code"), bool)
+            or not isinstance(metadata.get("status_code"), int)
+            or not isinstance(metadata.get("request_started_at"), str)
+            or not isinstance(metadata.get("response_retrieved_at"), str)
+            or not isinstance(metadata.get("artifact_written_at"), str)
+            or not isinstance(metadata.get("response_headers"), dict)
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in metadata.get("response_headers", {}).items()
+            )
+            or (
+                metadata.get("request_id") is not None
+                and not isinstance(metadata.get("request_id"), str)
+            )
+            or not isinstance(metadata.get("credit_header_errors"), list)
+            or any(
+                not isinstance(value, str)
+                for value in metadata.get("credit_header_errors", [])
+            )
+            or not isinstance(metadata.get("body_parse_status"), str)
+        ):
+            raise BudgetError("response evidence metadata is invalid")
+        for name in ("credit_cost", "credit_used", "credit_remaining"):
+            value = metadata[name]
+            if value is not None and (
+                not isinstance(value, int) or isinstance(value, bool) or value < 0
+            ):
+                raise BudgetError("response evidence metadata is invalid")
+        request_started = _parse_time(
+            metadata["request_started_at"], "response request start"
+        )
+        response_retrieved = _parse_time(
+            metadata["response_retrieved_at"], "response retrieval time"
+        )
+        artifact_written = _parse_time(
+            metadata["artifact_written_at"], "response durable-write time"
+        )
+        if request_started > response_retrieved or response_retrieved > artifact_written:
+            raise BudgetError("response evidence metadata contains a timestamp reversal")
+        if response is not None and (
+            metadata["status_code"] != response.status_code
+            or metadata["request_started_at"] != response.request_started_at
+            or metadata["response_retrieved_at"] != response.response_retrieved_at
+            or metadata["response_headers"] != dict(response.response_headers)
+            or metadata["request_id"] != response.request_id
+            or metadata["credit_cost"] != response.credit_cost
+            or metadata["credit_used"] != response.credit_used
+            or metadata["credit_remaining"] != response.credit_remaining
+            or metadata["credit_header_errors"] != list(response.credit_header_errors)
+            or metadata["body_parse_status"] != response.body_parse_status
+            or metadata["response_sha256"] != hashlib.sha256(response.raw_body).hexdigest()
+        ):
+            raise BudgetError("response evidence metadata does not match the response")
 
     def _settlement_entry(
         self,
@@ -668,7 +757,9 @@ class BudgetGuard:
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")
-            self._verify_response_artifact(current, response_artifact_sha256)
+            self._verify_response_artifact(
+                current, response_artifact_sha256, response
+            )
             incomplete = bool(response.credit_header_errors) or any(
                 value is None
                 for value in (response.credit_cost, response.credit_used, response.credit_remaining)
@@ -739,7 +830,9 @@ class BudgetGuard:
             response = failure.response
             if response is not None:
                 assert failure_artifact_sha256 is not None
-                self._verify_response_artifact(current, failure_artifact_sha256)
+                self._verify_response_artifact(
+                    current, failure_artifact_sha256, response
+                )
             if not failure.transmitted or (response is not None and response.credit_used == 0):
                 state = "failed_before_pricing"
             elif response is not None and response.credit_used is not None and response.credit_used > 0:
@@ -806,7 +899,9 @@ class BudgetGuard:
         with self._lock():
             entries, hashes, provider_remaining, halted_reason = self._replay_locked()
             current = self._current(reservation, entries, "reserved")
-            self._verify_response_artifact(current, failure_artifact_sha256)
+            self._verify_response_artifact(
+                current, failure_artifact_sha256, response
+            )
             if current.attempt_count != 1:
                 raise BudgetError("a second retry is forbidden")
             updated = replace(
@@ -868,13 +963,17 @@ class BudgetGuard:
             for candidate in list(entries):
                 request_path = self._artifact_path(candidate, "request")
                 response_path = self._artifact_path(candidate, "response")
+                metadata_path = self._artifact_path(candidate, "response-metadata")
                 if candidate.state in {"confirmed_zero", "confirmed_used", "retryable_zero"}:
-                    if candidate.response_artifact_sha256 is not None and (
-                        not response_path.is_file()
-                        or hashlib.sha256(response_path.read_bytes()).hexdigest()
-                        != candidate.response_artifact_sha256
-                    ):
-                        raise BudgetCorruption("confirmed ledger entry has missing response evidence")
+                    if candidate.response_artifact_sha256 is not None:
+                        try:
+                            self._verify_response_artifact(
+                                candidate, candidate.response_artifact_sha256
+                            )
+                        except BudgetError as exc:
+                            raise BudgetCorruption(
+                                "confirmed ledger entry has missing response evidence"
+                            ) from exc
                     continue
                 if candidate.state != "reserved" or candidate.request_artifact_sha256 is None:
                     continue
@@ -889,8 +988,9 @@ class BudgetGuard:
                     for item in entries
                     if item.logical_request_id == candidate.logical_request_id
                 )
-                if response_path.is_file():
-                    response_hash = hashlib.sha256(response_path.read_bytes()).hexdigest()
+                if response_path.is_file() and metadata_path.is_file():
+                    response_hash = hashlib.sha256(metadata_path.read_bytes()).hexdigest()
+                    self._verify_response_artifact(candidate, response_hash)
                     if current.response_artifact_sha256 is not None:
                         if current.response_artifact_sha256 != response_hash:
                             raise BudgetCorruption("recovered response evidence hash mismatch")

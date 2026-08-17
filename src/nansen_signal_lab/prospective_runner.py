@@ -580,7 +580,7 @@ def _nansen_call(
         else:
             if response_path.is_file() and metadata_path.is_file():
                 response = _load_nansen_response(response_path, metadata_path)
-                response_hash = _sha256_file(response_path)
+                response_hash = _sha256_file(metadata_path)
                 if reservation.response_artifact_sha256 not in {None, response_hash}:
                     raise PilotError("recovered Nansen response hash does not match its ledger")
                 if response.status_code >= 400:
@@ -614,10 +614,10 @@ def _nansen_call(
         except NansenRequestFailure as failure:
             failure_hash: str | None = None
             if failure.response is not None:
-                archived, _ = _archive_nansen_response(
+                archived, metadata = _archive_nansen_response(
                     root, reservation, failure.response, clock=clock
                 )
-                failure_hash = _sha256_file(archived)
+                failure_hash = _sha256_file(metadata)
             reservation = _settle_nansen_failure(
                 guard,
                 reservation,
@@ -632,7 +632,7 @@ def _nansen_call(
         guard.confirm(
             reservation,
             response,
-            response_artifact_sha256=_sha256_file(archived),
+            response_artifact_sha256=_sha256_file(metadata),
         )
         return response, (request_path, archived, metadata)
 
@@ -697,7 +697,12 @@ def _render_terminal_report(
 def _unsealed_evidence_paths(bundle: ProspectiveBundle) -> tuple[Path, ...]:
     sealed = {item["path"] for item in bundle.manifest["artifacts"]}
     candidates: list[Path] = []
-    for directory in (bundle.root / "raw", bundle.root / "model"):
+    for directory in (
+        bundle.root / "raw",
+        bundle.root / "model",
+        bundle.root / "derived",
+        bundle.root / "normalized",
+    ):
         if directory.exists():
             candidates.extend(path for path in directory.rglob("*.json") if path.is_file())
     return tuple(
@@ -705,9 +710,31 @@ def _unsealed_evidence_paths(bundle: ProspectiveBundle) -> tuple[Path, ...]:
             path
             for path in candidates
             if path.relative_to(bundle.root).as_posix() not in sealed
-            and "/conflicts/" not in path.relative_to(bundle.root).as_posix()
+            and ".conflicts" not in path.relative_to(bundle.root).parts
         )
     )
+
+
+def _conflict_references(bundle: ProspectiveBundle) -> list[dict[str, str]]:
+    references: list[dict[str, str]] = []
+    for directory in (
+        bundle.root / "raw",
+        bundle.root / "model",
+        bundle.root / "derived",
+        bundle.root / "normalized",
+    ):
+        if not directory.exists():
+            continue
+        for path in directory.rglob("*"):
+            relative = path.relative_to(bundle.root)
+            if ".conflicts" not in relative.parts:
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise PilotError("collision quarantine contains a redirected artifact")
+            references.append(
+                {"path": relative.as_posix(), "sha256": _sha256_file(path)}
+            )
+    return sorted(references, key=lambda item: item["path"])
 
 
 def _terminal_unscorable(
@@ -718,15 +745,47 @@ def _terminal_unscorable(
     artifacts: Iterable[Path],
     clock: Callable[[], datetime],
 ) -> ProspectiveBundle:
-    failure = _install_timestamped_json(
-        bundle.root / "derived" / f"unscorable-{bundle.manifest['stage']}.json",
-        {
-            "schema_version": 1,
-            "reason": reason,
-        },
-        kind="unscorable_reason",
-        clock=clock,
+    failure_path = (
+        bundle.root / "derived" / f"unscorable-{bundle.manifest['stage']}.json"
     )
+    if failure_path.exists():
+        if failure_path.is_symlink() or not failure_path.is_file():
+            raise PilotError("existing terminal reason is not a regular file")
+        try:
+            durable_failure = json.loads(failure_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PilotError("existing terminal reason is unreadable") from exc
+        if (
+            not isinstance(durable_failure, dict)
+            or set(durable_failure) != {
+                "schema_version",
+                "reason",
+                "collision_quarantine",
+                "artifact_written_at",
+            }
+            or durable_failure.get("schema_version") != 1
+            or not isinstance(durable_failure.get("reason"), str)
+            or not durable_failure["reason"]
+            or not isinstance(durable_failure.get("collision_quarantine"), list)
+        ):
+            raise PilotError("existing terminal reason has an invalid shape")
+        _parse_time(
+            durable_failure.get("artifact_written_at"),
+            field="terminal reason write time",
+        )
+        reason = durable_failure["reason"]
+        failure = failure_path
+    else:
+        failure = _install_timestamped_json(
+            failure_path,
+            {
+                "schema_version": 1,
+                "reason": reason,
+                "collision_quarantine": _conflict_references(bundle),
+            },
+            kind="unscorable_reason",
+            clock=clock,
+        )
     report = _install_bytes(
         bundle.root / "REPORT.md",
         _render_terminal_report(
@@ -989,7 +1048,45 @@ def start_pilot(
             clock=clock,
         )
 
-    available_at = _clock_value(clock)
+    cutoff_path = current.root / "derived/snapshot-cutoff.json"
+    if cutoff_path.exists():
+        if cutoff_path.is_symlink() or not cutoff_path.is_file():
+            raise PilotError("existing snapshot cutoff is not a regular file")
+        try:
+            cutoff = json.loads(cutoff_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PilotError("existing snapshot cutoff is unreadable") from exc
+        if (
+            not isinstance(cutoff, dict)
+            or set(cutoff)
+            != {"schema_version", "available_at", "artifact_written_at"}
+            or cutoff.get("schema_version") != 1
+        ):
+            raise PilotError("existing snapshot cutoff has an invalid shape")
+        available_at = _parse_time(
+            cutoff.get("available_at"), field="snapshot cutoff available_at"
+        )
+        cutoff_written_at = _parse_time(
+            cutoff.get("artifact_written_at"), field="snapshot cutoff write time"
+        )
+    else:
+        available_at = _clock_value(clock)
+        cutoff_path = _install_timestamped_json(
+            cutoff_path,
+            {
+                "schema_version": 1,
+                "available_at": _utc_text(available_at),
+            },
+            kind="snapshot_cutoff",
+            clock=clock,
+        )
+        cutoff_written_at = _parse_time(
+            json.loads(cutoff_path.read_text()).get("artifact_written_at"),
+            field="snapshot cutoff write time",
+        )
+    if cutoff_written_at < available_at:
+        raise PilotError("snapshot cutoff durable-write time precedes available_at")
+    pre_snapshot_artifacts.append(cutoff_path)
     try:
         screener, paths = _nansen_call(
             root=current.root,
