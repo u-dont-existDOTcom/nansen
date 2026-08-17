@@ -631,6 +631,32 @@ def test_signal_manifest_rejects_companion_directory_symlink_to_external_bundle(
     assert str(trusted_experiments.resolve()) in str(error.value)
 
 
+def test_signal_manifest_lexically_normalizes_dotdot_before_resolving_symlinks(tmp_path):
+    """Fails if a symlink followed by dot-dot can relocate the trusted experiments root."""
+    external_manifest, _ = write_signal_bundle(tmp_path / "external-fixture")
+    external_experiments = external_manifest.parent.parent
+    external_companion = external_experiments / "companion"
+    external_manifest.parent.rename(external_companion)
+    external_placeholder = external_experiments / "placeholder"
+    external_placeholder.mkdir()
+
+    trusted_experiments = tmp_path / "trusted" / "experiments"
+    trusted_experiments.mkdir(parents=True)
+    (trusted_experiments / "jump").symlink_to(
+        external_placeholder, target_is_directory=True
+    )
+    requested_manifest = (
+        trusted_experiments / "jump" / ".." / "companion" / "manifest.json"
+    )
+
+    with pytest.raises(ExperimentError, match="cannot read manifest") as error:
+        experiment.load_signal_manifest(requested_manifest)
+
+    expected_trusted_manifest = trusted_experiments / "companion" / "manifest.json"
+    assert str(expected_trusted_manifest) in str(error.value)
+    assert str(external_companion) not in str(error.value)
+
+
 def test_signal_manifest_rejects_source_hash_mismatch(tmp_path):
     """Fails if a companion can silently bind to source-manifest byte drift."""
     manifest, _ = write_signal_bundle(tmp_path)
