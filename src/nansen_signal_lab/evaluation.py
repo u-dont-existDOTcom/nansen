@@ -53,6 +53,13 @@ class ComparisonSpec:
 
 
 @dataclass(frozen=True)
+class BlockedTheorySpec:
+    id: str
+    reason: str
+    missing_roles: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class EvaluationBundle:
     root: Path
     manifest_path: Path
@@ -62,6 +69,7 @@ class EvaluationBundle:
     blocks: tuple[TimeBlock, ...]
     costs: tuple[CostScenario, ...]
     comparisons: tuple[ComparisonSpec, ...]
+    blocked_theories: tuple[BlockedTheorySpec, ...]
 
     @property
     def experiment_id(self) -> str:
@@ -94,6 +102,7 @@ _COST_KEYS = {"id", "per_side_bps"}
 _THEORY_KEYS = {"id", "role", "objective", "holding_period_hours", "all"}
 _PREDICATE_KEYS = {"feature", "operator", "value", "lag_hours"}
 _COMPARISON_KEYS = {"id", "positive_arm", "reference_arm"}
+_BLOCKED_THEORY_KEYS = {"id", "reason", "missing_roles"}
 _PAPER_GATE_KEYS = {
     "entry_min_events",
     "entry_min_tokens",
@@ -238,7 +247,13 @@ def _validate_gates(record: Any, expected: set[str], *, label: str, context: str
 
 def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
     requested_path = Path(os.path.abspath(os.fspath(manifest_path)))
+    requested_experiments_root = requested_path.parent.parent.resolve()
     path = requested_path.resolve()
+    if path.parent.parent != requested_experiments_root:
+        raise EvaluationError(
+            "evaluation manifest must remain under the requested trusted experiments root "
+            f"{requested_experiments_root}: requested {requested_path}, resolved {path}"
+        )
     context = ""
     try:
         manifest = json.loads(path.read_text())
@@ -309,6 +324,12 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         costs.append(CostScenario(cost_id, _finite_number(record["per_side_bps"], field="cost per_side_bps", context=context, nonnegative=True)))
     if seen_costs != {"base", "stress"}:
         raise EvaluationError(f"cost scenario IDs must be exactly base and stress{context}")
+    cost_values = {item.id: item.per_side_bps for item in costs}
+    for cost_id, expected in {"base": 100.0, "stress": 250.0}.items():
+        if cost_values[cost_id] != expected:
+            raise EvaluationError(
+                f"cost scenario {cost_id} must be exactly {expected:g} per_side_bps{context}"
+            )
 
     # The source is checked before the existing loader is called so an altered or
     # redirected source cannot be silently accepted by lineage validation.
@@ -376,11 +397,26 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         positive = _nonempty_string(record["positive_arm"], field="comparison positive_arm", context=context)
         reference = _nonempty_string(record["reference_arm"], field="comparison reference_arm", context=context)
         comparisons.append(ComparisonSpec(comparison_id, positive, reference))
-    blocked = manifest["blocked_theories"]
-    if not isinstance(blocked, list) or any(not isinstance(item, str) or not item.strip() for item in blocked):
-        raise EvaluationError(f"blocked_theories must be a list of non-empty IDs{context}")
-    if len(blocked) != len(set(blocked)):
-        raise EvaluationError(f"blocked_theories must contain unique IDs{context}")
+    blocked_raw = manifest["blocked_theories"]
+    if not isinstance(blocked_raw, list):
+        raise EvaluationError(f"blocked_theories must be a list{context}")
+    blocked: list[BlockedTheorySpec] = []
+    blocked_ids: set[str] = set()
+    for record in blocked_raw:
+        _keys(record, _BLOCKED_THEORY_KEYS, label="blocked theory", context=context)
+        blocked_id = _nonempty_string(record["id"], field="blocked theory id", context=context)
+        if blocked_id in blocked_ids:
+            raise EvaluationError(f"blocked theory IDs must be unique: {blocked_id}{context}")
+        blocked_ids.add(blocked_id)
+        reason = _nonempty_string(record["reason"], field="blocked theory reason", context=context)
+        missing_roles = record["missing_roles"]
+        if not isinstance(missing_roles, list) or not missing_roles:
+            raise EvaluationError(f"blocked theory missing_roles must be a non-empty list{context}")
+        if any(not isinstance(role, str) or not role.strip() for role in missing_roles):
+            raise EvaluationError(f"blocked theory missing_roles must contain non-empty strings{context}")
+        if len(missing_roles) != len(set(missing_roles)):
+            raise EvaluationError(f"blocked theory missing_roles must be unique{context}")
+        blocked.append(BlockedTheorySpec(blocked_id, reason, tuple(missing_roles)))
     _validate_gates(manifest["paper_feasibility_gates"], _PAPER_GATE_KEYS, label="paper feasibility gate", context=context)
     _validate_gates(manifest["prospective_advancement_gates"], _ADVANCEMENT_GATE_KEYS, label="prospective advancement gate", context=context)
 
@@ -393,4 +429,5 @@ def load_evaluation_manifest(manifest_path: str | Path) -> EvaluationBundle:
         blocks=tuple(blocks),
         costs=tuple(costs),
         comparisons=tuple(comparisons),
+        blocked_theories=tuple(blocked),
     )

@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from src.nansen_signal_lab.evaluation import EvaluationError, load_evaluation_manifest
+from src.nansen_signal_lab.evaluation import (
+    BlockedTheorySpec,
+    EvaluationError,
+    load_evaluation_manifest,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 PILOT = ROOT / "research/experiments/2026-08-16-seven-token-pilot"
@@ -110,6 +114,22 @@ def test_load_evaluation_manifest_rejects_invalid_contract(tmp_path, mutation, m
         load_evaluation_manifest(path)
 
 
+@pytest.mark.parametrize(
+    ("scenario_id", "per_side_bps"),
+    [("base", 99), ("stress", 251)],
+)
+def test_load_evaluation_manifest_requires_frozen_cost_values(
+    tmp_path, scenario_id, per_side_bps
+):
+    path, manifest = _bundle(tmp_path)
+    next(item for item in manifest["cost_scenarios"] if item["id"] == scenario_id)[
+        "per_side_bps"
+    ] = per_side_bps
+    _write(path, manifest)
+    with pytest.raises(EvaluationError, match=rf"cost scenario {scenario_id} must be exactly"):
+        load_evaluation_manifest(path)
+
+
 @pytest.mark.parametrize("mutation, message", [
     (lambda m: m.pop("title"), "missing keys: title"),
     (lambda m: m.update(unexpected=True), "unknown keys: unexpected"),
@@ -144,6 +164,17 @@ def test_load_evaluation_manifest_rejects_source_outside_trusted_sibling_root(tm
         load_evaluation_manifest(path)
 
 
+def test_load_evaluation_manifest_rejects_evaluation_manifest_symlink_escape(tmp_path):
+    external_path, _ = _bundle(tmp_path / "external")
+    trusted_experiments = tmp_path / "trusted" / "experiments"
+    trusted_experiments.mkdir(parents=True)
+    linked_bundle = trusted_experiments / "linked-evaluation"
+    linked_bundle.symlink_to(external_path.parent, target_is_directory=True)
+
+    with pytest.raises(EvaluationError, match="evaluation manifest.*trusted experiments root"):
+        load_evaluation_manifest(linked_bundle / "manifest.json")
+
+
 def test_load_evaluation_manifest_rejects_symlinked_source(tmp_path):
     path, manifest = _bundle(tmp_path)
     source = path.parent.parent / "2026-08-16-community-signal-shadow" / "manifest.json"
@@ -170,6 +201,46 @@ def test_load_evaluation_manifest_rejects_non_scalar_or_invalid_predicates(tmp_p
     feature.update({"operator": "in", "value": []})
     _write(path, manifest)
     with pytest.raises(EvaluationError, match="non-empty unique scalar"):
+        load_evaluation_manifest(path)
+
+
+def test_load_evaluation_manifest_preserves_structured_blocked_theory_reason(tmp_path):
+    path, manifest = _bundle(tmp_path)
+    manifest["blocked_theories"] = [{
+        "id": "buyer-breadth-exchange-confirmation-v1",
+        "reason": "frozen evidence lacks point-in-time buyer and exchange flow history",
+        "missing_roles": ["wallet_buyer_breadth", "exchange_labelled_flow"],
+    }]
+    _write(path, manifest)
+
+    bundle = load_evaluation_manifest(path)
+
+    assert bundle.blocked_theories == (
+        BlockedTheorySpec(
+            id="buyer-breadth-exchange-confirmation-v1",
+            reason="frozen evidence lacks point-in-time buyer and exchange flow history",
+            missing_roles=("wallet_buyer_breadth", "exchange_labelled_flow"),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "blocked, message",
+    [
+        (["buyer-breadth-exchange-confirmation-v1"], "blocked theory"),
+        ([{"id": "h5", "reason": "missing", "missing_roles": []}], "missing_roles"),
+        ([{"id": "h5", "reason": "", "missing_roles": ["wallet_buyer_breadth"]}], "reason"),
+        ([{"id": "h5", "reason": "missing", "missing_roles": ["wallet_buyer_breadth", "wallet_buyer_breadth"]}], "unique"),
+        ([{"id": "h5", "reason": "missing", "missing_roles": ["wallet_buyer_breadth"], "extra": True}], "unknown keys"),
+    ],
+)
+def test_load_evaluation_manifest_rejects_unstructured_or_malformed_blocked_theories(
+    tmp_path, blocked, message
+):
+    path, manifest = _bundle(tmp_path)
+    manifest["blocked_theories"] = blocked
+    _write(path, manifest)
+    with pytest.raises(EvaluationError, match=message):
         load_evaluation_manifest(path)
 
 
