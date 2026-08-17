@@ -66,3 +66,12 @@ This ledger is append-only: add new dated entries at the end; do not rewrite pri
 - **Contract:** Unchanged from the original preregistration: exact `gpt-5.6-sol`, two identity-blinded no-tool passes, the same six hash-bound frozen records, page-local eligible selection, common observed fills, strict-greater-than scoring, and the ten-call/ten-credit ceiling.
 - **Independence:** This bundle has a distinct experiment ID and creation time. It does not overwrite, reopen, or reuse any request from the terminal HTTP-401 observation.
 - **Follow-up:** Run only from its committed preregistered state. Any transmitted failure remains terminal and is never rerolled.
+
+## 2026-08-17 — GPT prospective pilot successor terminal account-evidence failure
+
+- **Bundle:** [`research/experiments/2026-08-17-gpt-prospective-pilot-successor/`](../research/experiments/2026-08-17-gpt-prospective-pilot-successor/) — immutable terminal schema-v4 bundle; manifest SHA-256 `5d0c5cb7517ebeec53bc1f8628f7271f6e83786ef90e3d9d1d3d379cf346b52b`.
+- **Terminal report:** [`REPORT.md`](../research/experiments/2026-08-17-gpt-prospective-pilot-successor/REPORT.md) — verdict `unscorable`; report SHA-256 `5bc9038e983b5cb8b0701f06430cbfafa7fa2f4ed26ac1d7445630a83bbaec62`.
+- **OpenAI result:** The corrected key passed; the exact `gpt-5.6-sol` model-access preflight returned HTTP 200. No inference was requested.
+- **Nansen result:** The free account response returned plan `free`, body balance `90`, and cost header `0`, but omitted the declared use and remaining headers. The protocol stopped before the screener or any token-specific request.
+- **Accounting:** One ambiguous call/credit is reserved conservatively; no provider deduction is confirmed. No selected token, snapshot, GPT output, comparator decision, paper fill, or market outcome exists.
+- **Disposition:** Correct fail-closed outcome, not evidence about model quality. See the [successor result review](audits/2026-08-17-gpt-prospective-pilot-successor-result-review.md). Do not create another automatic retry while the account endpoint omits the required headers.
