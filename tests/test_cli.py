@@ -4,7 +4,11 @@ import hashlib
 import json
 import multiprocessing
 import os
+import subprocess
+import sys
+import textwrap
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -72,6 +76,106 @@ def test_exchange_flows_preserve_label_and_use_distinct_default_path(tmp_path, m
     response_path = tmp_path / "results" / "flows-exchange-base-0xtoken.json"
     assert json.loads(response_path.read_text()) == body
     assert json.loads(response_path.with_name("flows-exchange-base-0xtoken.request.json").read_text())["payload"]["label"] == "exchange"
+
+
+def test_exchange_flows_normalize_timezone_aware_bounds_to_utc(tmp_path, monkeypatch):
+    """Fails if valid offset bounds are archived without normalization to canonical UTC."""
+    class FakeNansenClient:
+        def post_with_provenance(self, endpoint, payload, *, refresh=False):
+            assert payload["date"] == {
+                "from": "2026-08-01T00:00:00Z",
+                "to": "2026-08-02T00:00:00Z",
+            }
+            return SimpleNamespace(
+                body={"data": []},
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:01:00Z",
+            )
+
+    monkeypatch.setattr(cli, "NansenClient", FakeNansenClient)
+    output = tmp_path / "exchange.json"
+    args = cli.build_parser().parse_args([
+        "flows", "--chain", "base", "--token", "0xtoken", "--label", "exchange",
+        "--from", "2026-08-01T01:00:00+01:00",
+        "--to", "2026-08-02T01:00:00+01:00",
+        "--output", str(output),
+    ])
+
+    args.func(args)
+
+
+@pytest.mark.parametrize(
+    ("bounds", "message"),
+    [
+        (
+            ["--from", "2026-08-01T00:00:00", "--to", "2026-08-02T00:00:00Z"],
+            "timezone-aware",
+        ),
+        (
+            ["--from", "2026-08-02T00:00:00Z", "--to", "2026-08-01T00:00:00Z"],
+            "before --to",
+        ),
+        (["--days", "0", "--to", "2026-08-02T00:00:00Z"], "positive"),
+        (["--days", "-1", "--to", "2026-08-02T00:00:00Z"], "positive"),
+        (
+            ["--from", "2026-08-01T00:00:00Z", "--to", "2026-08-02T00:00:00Z", "--limit", "0"],
+            "between 1 and 100",
+        ),
+        (
+            ["--from", "2026-08-01T00:00:00Z", "--to", "2026-08-02T00:00:00Z", "--limit", "101"],
+            "between 1 and 100",
+        ),
+    ],
+    ids=["naive", "reversed", "zero-days", "negative-days", "zero-limit", "large-limit"],
+)
+def test_exchange_flows_reject_invalid_requests_before_client_construction(
+    tmp_path, monkeypatch, bounds, message
+):
+    """Fails if an invalid exchange request can construct a client or create evidence."""
+    class ApiMustNotBeCalled:
+        def __init__(self):
+            raise AssertionError("API client constructed for invalid exchange request")
+
+    monkeypatch.setattr(cli, "NansenClient", ApiMustNotBeCalled)
+    output = tmp_path / "exchange.json"
+    args = cli.build_parser().parse_args([
+        "flows", "--chain", "base", "--token", "0xtoken", "--label", "exchange",
+        "--output", str(output),
+        *bounds,
+    ])
+
+    with pytest.raises(ValueError, match=message):
+        args.func(args)
+    assert not output.exists()
+    assert not output.with_name("exchange.request.json").exists()
+
+
+@pytest.mark.parametrize("body", [[], {"data": {}}], ids=["non-object", "non-list-data"])
+def test_exchange_flows_reject_malformed_response_before_artifact_writing(
+    tmp_path, monkeypatch, body
+):
+    """Fails if malformed exchange response data can be archived as evidence."""
+    output = tmp_path / "exchange.json"
+
+    class FakeNansenClient:
+        def post_with_provenance(self, endpoint, payload, *, refresh=False):
+            return SimpleNamespace(
+                body=body,
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:01:00Z",
+            )
+
+    monkeypatch.setattr(cli, "NansenClient", FakeNansenClient)
+    args = cli.build_parser().parse_args([
+        "flows", "--chain", "base", "--token", "0xtoken", "--label", "exchange",
+        "--from", "2026-08-01T00:00:00Z", "--to", "2026-08-02T00:00:00Z",
+        "--output", str(output),
+    ])
+
+    with pytest.raises(ValueError, match="API response data must be a list"):
+        args.func(args)
+    assert not output.exists()
+    assert not output.with_name("exchange.request.json").exists()
 
 
 def test_who_bought_sold_archives_exact_buy_payload_and_incomplete_page_warning(
@@ -441,6 +545,199 @@ def test_artifact_lock_is_released_after_abrupt_owner_exit(tmp_path):
 
     assert response_path.exists()
     assert request_path.exists()
+
+
+def test_write_api_artifacts_recovers_pair_after_real_subprocess_crash(tmp_path):
+    """Fails if abrupt mid-commit exit leaves mismatched evidence or transaction debris."""
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    output = artifact_dir / "evidence.json"
+    request = artifact_dir / "evidence.request.json"
+    cli.write_api_artifacts(
+        body={"data": ["old"]},
+        payload={"writer": "old"},
+        endpoint="tgm/flows",
+        output_path=output,
+        cache_hit=False,
+        response_retrieved_at="2026-08-02T00:01:00Z",
+        artifact_written_at="2026-08-02T00:02:00Z",
+    )
+    crash_marker = tmp_path / "response-installed.marker"
+    child_code = textwrap.dedent(
+        """
+        import os
+        import sys
+        from pathlib import Path
+
+        import src.nansen_signal_lab.cli as cli
+
+        output = Path(sys.argv[1])
+        marker = Path(sys.argv[2])
+        install_artifact = cli._install_artifact
+
+        def crash_after_response_install(temporary, target):
+            install_artifact(temporary, target)
+            if target == output:
+                with marker.open("wb") as signal:
+                    signal.write(b"response-installed\\n")
+                    signal.flush()
+                    os.fsync(signal.fileno())
+                os._exit(86)
+
+        cli._install_artifact = crash_after_response_install
+        cli.write_api_artifacts(
+            body={"data": ["interrupted"]},
+            payload={"writer": "interrupted"},
+            endpoint="tgm/flows",
+            output_path=output,
+            cache_hit=False,
+            response_retrieved_at="2026-08-02T00:03:00Z",
+            artifact_written_at="2026-08-02T00:04:00Z",
+        )
+        """
+    )
+
+    crashed = subprocess.run(
+        [sys.executable, "-c", child_code, str(output), str(crash_marker)],
+        cwd=Path.cwd(),
+        timeout=10,
+        check=False,
+    )
+
+    assert crashed.returncode == 86
+    assert crash_marker.read_text() == "response-installed\n"
+    interrupted_metadata = json.loads(request.read_text())
+    assert hashlib.sha256(output.read_bytes()).hexdigest() != interrupted_metadata[
+        "response_sha256"
+    ]
+
+    with pytest.raises(FileExistsError, match="refusing to overwrite"):
+        cli.write_api_artifacts(
+            body={"data": ["must-not-overwrite"]},
+            payload={"writer": "must-not-overwrite"},
+            endpoint="tgm/flows",
+            output_path=output,
+            cache_hit=False,
+            response_retrieved_at="2026-08-02T00:05:00Z",
+            artifact_written_at="2026-08-02T00:06:00Z",
+            overwrite=False,
+        )
+
+    recovered_metadata = json.loads(request.read_text())
+    assert json.loads(output.read_text()) == {"data": ["interrupted"]}
+    assert recovered_metadata["payload"] == {"writer": "interrupted"}
+    assert hashlib.sha256(output.read_bytes()).hexdigest() == recovered_metadata[
+        "response_sha256"
+    ]
+    assert not list(artifact_dir.glob(".*"))
+
+
+@pytest.mark.parametrize(
+    "restored_target",
+    ["evidence.json", "evidence.request.json"],
+    ids=["after-response-restore", "after-sidecar-restore"],
+)
+def test_write_api_artifacts_recovers_repeatedly_after_rollback_crash(
+    tmp_path, restored_target
+):
+    """Fails if rollback direction is not durable and idempotent across process exit."""
+    artifact_dir = tmp_path / "artifacts"
+    artifact_dir.mkdir()
+    output = artifact_dir / "evidence.json"
+    request = artifact_dir / "evidence.request.json"
+    cli.write_api_artifacts(
+        body={"data": ["old"]},
+        payload={"writer": "old"},
+        endpoint="tgm/flows",
+        output_path=output,
+        cache_hit=False,
+        response_retrieved_at="2026-08-02T00:01:00Z",
+        artifact_written_at="2026-08-02T00:02:00Z",
+    )
+    old_response = output.read_bytes()
+    old_request = request.read_bytes()
+    crash_marker = tmp_path / f"{restored_target}.restored.marker"
+    child_code = textwrap.dedent(
+        """
+        import os
+        import sys
+        from pathlib import Path
+
+        import src.nansen_signal_lab.cli as cli
+
+        output = Path(sys.argv[1])
+        request = Path(sys.argv[2])
+        marker = Path(sys.argv[3])
+        restored_target = sys.argv[4]
+        install_artifact = cli._install_artifact
+        path_replace = Path.replace
+
+        def fail_sidecar_install(temporary, target):
+            if target == request:
+                raise OSError("injected sidecar install failure")
+            install_artifact(temporary, target)
+
+        def crash_after_target_restore(path, target):
+            result = path_replace(path, target)
+            if path.name.endswith(".bak") and Path(target).name == restored_target:
+                with marker.open("wb") as signal:
+                    signal.write(b"target-restored\\n")
+                    signal.flush()
+                    os.fsync(signal.fileno())
+                os._exit(87)
+            return result
+
+        cli._install_artifact = fail_sidecar_install
+        Path.replace = crash_after_target_restore
+        cli.write_api_artifacts(
+            body={"data": ["new"]},
+            payload={"writer": "new"},
+            endpoint="tgm/flows",
+            output_path=output,
+            cache_hit=False,
+            response_retrieved_at="2026-08-02T00:03:00Z",
+            artifact_written_at="2026-08-02T00:04:00Z",
+        )
+        """
+    )
+
+    crashed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            child_code,
+            str(output),
+            str(request),
+            str(crash_marker),
+            restored_target,
+        ],
+        cwd=Path.cwd(),
+        timeout=10,
+        check=False,
+    )
+
+    assert crashed.returncode == 87
+    assert crash_marker.read_text() == "target-restored\n"
+    for attempt in range(2):
+        with pytest.raises(FileExistsError, match="refusing to overwrite"):
+            cli.write_api_artifacts(
+                body={"data": [f"must-not-overwrite-{attempt}"]},
+                payload={"writer": f"must-not-overwrite-{attempt}"},
+                endpoint="tgm/flows",
+                output_path=output,
+                cache_hit=False,
+                response_retrieved_at="2026-08-02T00:05:00Z",
+                artifact_written_at="2026-08-02T00:06:00Z",
+                overwrite=False,
+            )
+
+    assert output.read_bytes() == old_response
+    assert request.read_bytes() == old_request
+    recovered_metadata = json.loads(request.read_text())
+    assert hashlib.sha256(output.read_bytes()).hexdigest() == recovered_metadata[
+        "response_sha256"
+    ]
+    assert not list(artifact_dir.glob(".*"))
 
 
 def test_write_api_artifacts_cleans_registered_backup_when_later_backup_fails(

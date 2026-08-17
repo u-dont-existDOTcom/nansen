@@ -317,6 +317,32 @@ def test_prepare_rows_excludes_unsafe_price_or_holdings(field, value):
     assert prepared.invalid_metric_count == 1
 
 
+@pytest.mark.parametrize(
+    "holders_count",
+    [float("nan"), float("inf"), -1, True, "not-a-number"],
+    ids=["nan", "infinity", "negative", "boolean", "malformed"],
+)
+def test_prepare_rows_excludes_invalid_holder_counts(holders_count):
+    """Fails if invalid breadth input crosses the experiment preparation boundary."""
+    row = flow_row(0, 10, 100, holders=holders_count)
+
+    prepared = prepare_flow_rows({"data": [row]})
+
+    assert prepared.rows == ()
+    assert prepared.invalid_metric_count == 1
+
+
+def test_prepare_rows_keeps_missing_holder_count_as_unavailable():
+    """Fails if an unavailable breadth value incorrectly invalidates other row metrics."""
+    row = flow_row(0, 10, 100, holders=None)
+
+    prepared = prepare_flow_rows({"data": [row]})
+
+    assert len(prepared.rows) == 1
+    assert prepared.rows[0]["holders_count"] is None
+    assert prepared.invalid_metric_count == 0
+
+
 def test_feature_and_event_windows_do_not_cross_gap_or_future():
     """Fails if returns bridge a missing hour or label an immature horizon available."""
     body = {"data": [
@@ -460,6 +486,7 @@ def write_bundle(tmp_path: Path) -> Path:
                 "request": {
                     "chain": "base",
                     "token_address": "0xfixture",
+                    "label": "smart_money",
                     "exact_from": None,
                     "exact_to": None,
                     "boundary_provenance": "unavailable in fixture",
@@ -737,6 +764,39 @@ def test_signal_manifest_enforces_status_guarantee_matrix(
         experiment.load_signal_manifest(manifest)
 
 
+def test_signal_manifest_rejects_holdout_over_discovery_source(tmp_path):
+    """Fails if a companion can self-assert holdout provenance over discovery evidence."""
+    manifest, _ = write_signal_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    data["status"] = "holdout"
+    data["point_in_time_guarantee"] = "provider_pit"
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(
+        ExperimentError,
+        match="holdout companion",
+    ):
+        experiment.load_signal_manifest(manifest)
+
+
+def test_signal_manifest_rejects_holdout_over_legacy_v1_marked_holdout(tmp_path):
+    """Fails if changing legacy v1 status can bypass its discovery-only evidence class."""
+    manifest, source_manifest = write_signal_bundle(tmp_path)
+    source = json.loads(source_manifest.read_text())
+    source["status"] = "holdout"
+    source_manifest.write_text(json.dumps(source))
+    data = json.loads(manifest.read_text())
+    data["status"] = "holdout"
+    data["point_in_time_guarantee"] = "provider_pit"
+    data["source_manifest_sha256"] = hashlib.sha256(
+        source_manifest.read_bytes()
+    ).hexdigest()
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="legacy schema-v1 source"):
+        experiment.load_signal_manifest(manifest)
+
+
 def test_signal_manifest_requires_bucket_end_availability(tmp_path):
     """Fails if signal timestamps can claim availability before finalized bucket end."""
     manifest, _ = write_signal_bundle(tmp_path)
@@ -949,6 +1009,56 @@ def test_manifest_rejects_flow_request_identity_mismatch(tmp_path, field, value)
         load_and_validate_manifest(manifest)
 
 
+@pytest.mark.parametrize("nested", [False, True], ids=["legacy", "nested-payload"])
+def test_manifest_accepts_exact_smart_money_request_label_shapes(tmp_path, nested):
+    """Fails if either supported exact-request shape loses its Smart-Money role binding."""
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    if nested:
+        data["evidence"][0]["request"] = {
+            "method": "POST",
+            "endpoint": "tgm/flows",
+            "payload": {
+                "chain": "base",
+                "token_address": "0xfixture",
+                "label": "smart_money",
+            },
+        }
+    manifest.write_text(json.dumps(data))
+
+    assert load_and_validate_manifest(manifest).experiment_id == "fixture"
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["missing", "nested-missing", "exchange", "conflicting"],
+)
+def test_manifest_rejects_non_smart_money_source_request_labels(tmp_path, case):
+    """Fails if missing, exchange, or contradictory label provenance can feed signals."""
+    manifest = write_bundle(tmp_path)
+    data = json.loads(manifest.read_text())
+    request = data["evidence"][0]["request"]
+    if case == "missing":
+        request.pop("label")
+    elif case == "nested-missing":
+        request["payload"] = {
+            "chain": "base",
+            "token_address": "0xfixture",
+        }
+    elif case == "exchange":
+        request["label"] = "exchange"
+    else:
+        request["payload"] = {
+            "chain": "base",
+            "token_address": "0xfixture",
+            "label": "exchange",
+        }
+    manifest.write_text(json.dumps(data))
+
+    with pytest.raises(ExperimentError, match="flow request label"):
+        load_and_validate_manifest(manifest)
+
+
 def test_manifest_rejects_unknown_candidate_selection_evidence(tmp_path):
     """Fails if cohort selection points outside the evidence index."""
     manifest = write_bundle(tmp_path)
@@ -1023,7 +1133,11 @@ def test_manifest_treats_solana_address_case_as_significant(tmp_path):
     data["cohort"].append(second)
     second_flow = dict(data["evidence"][0])
     second_flow["id"] = "flows-fix-2"
-    second_flow["request"] = {"chain": "solana", "token_address": "abc"}
+    second_flow["request"] = {
+        "chain": "solana",
+        "token_address": "abc",
+        "label": "smart_money",
+    }
     data["evidence"].append(second_flow)
     manifest.write_text(json.dumps(data))
 

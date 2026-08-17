@@ -40,6 +40,14 @@ def _validate(features):
             value = row.get(name)
             if not isinstance(value, (int, float)) or not isfinite(value) or value <= lower if name == "price_usd" else not isinstance(value, (int, float)) or not isfinite(value) or value < lower:
                 raise SignalError(f"invalid {name}")
+        holders_count = row.get("holders_count")
+        if holders_count is not None and (
+            not isinstance(holders_count, (int, float))
+            or isinstance(holders_count, bool)
+            or not isfinite(holders_count)
+            or holders_count < 0
+        ):
+            raise SignalError("invalid holders_count")
         row["_timestamp"] = timestamp; rows.append(row); seen.add(timestamp)
     return tuple(rows)
 
