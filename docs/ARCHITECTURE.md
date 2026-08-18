@@ -57,6 +57,36 @@ The command is offline: it neither loads `.env` nor constructs `NansenClient`. I
 
 The upgrade path is a new evidence collection, not threshold revision. Historical/beta endpoint use must archive every page, request, retrieval time, schema version, completeness marker, and hash, and may claim point-in-time status only where the provider contract explicitly supplies it. Historical Token Screener, Smart-Money balances, buyer/seller breadth, token-flow summaries, OHLCV, DEX trades, point-in-time liquidity, and executable quotes are the required inputs before a broader backtest or prospective paper advancement.
 
+## Bounded historical holder-breadth discovery
+
+The `holder-breadth-daily-v1` workflow is a separate immutable discovery family.
+It freezes a historical screener date and deterministic 20-token universe, then
+collects at most two complete point-in-time daily historical-holdings pages and
+at most five independent chain-batched daily OHLCV responses. A four-day
+accumulation condition is partitioned into positive and non-positive
+holder-breadth arms and evaluated at a fixed twelve-day horizon across four
+chronological blocks. Every eligible signal remains in the denominator, and
+advancement requires complete outcome coverage. Thresholds, dates, costs, and
+advancement gates are bound before collection.
+
+The live command first matches the exact public OpenAPI bytes and proves the
+account balance, then enforces nine authenticated request attempts and twelve
+credits with no automatic retries. It
+uses the same durable request-before-transmission, exact-response archive, and
+hash-linked budget journal as the prospective runner. Init and check never load
+credentials.
+
+```bash
+./nansen-lab historical-init --experiment-dir research/experiments/EXPERIMENT_ID
+./nansen-lab historical-start --manifest research/experiments/EXPERIMENT_ID/manifest.json
+./nansen-lab historical-check --manifest research/experiments/EXPERIMENT_ID/manifest.json
+```
+
+The result can prioritize or drop the daily holder-breadth analogue. It cannot
+advance to capital: screener beta risk, selection-date-only liquidity, daily
+close proxies, and assumed 100/250-bps costs keep it below prospective and
+execution-aware profitability gates.
+
 ## Prospective schema-v4 GPT pilot
 
 `2026-08-17-gpt-prospective-pilot` is a one-token, paper-only observation bound by hash to the frozen schema-v3 strategy records, the prospective design, and the pinned Nansen OpenAPI contract extract. Its lifecycle is append-only: `preregistered -> snapshot_collected -> decision_sealed -> entry_observed -> settled`, with `unscorable` as a terminal failure state. Every stage uses a hash-linked seal and an immutable snapshot of the Nansen budget journal; the mutable budget head is only a recoverable cache.

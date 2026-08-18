@@ -782,9 +782,12 @@ class BudgetGuard:
             elif response.credit_remaining != provider_remaining - response.credit_used:
                 state = "ambiguous"
                 reason = "pricing remaining-balance mismatch"
-            elif current.expected_credits > 0 and response.credit_cost != 1:
+            elif (
+                response.credit_cost != current.expected_credits
+                or response.credit_used != current.expected_credits
+            ):
                 state = "confirmed_used" if response.credit_used > 0 else "ambiguous"
-                reason = "pricing cost drift"
+                reason = "pricing cost/use drift"
                 next_remaining = response.credit_remaining
             else:
                 state = "confirmed_zero" if response.credit_used == 0 else "confirmed_used"

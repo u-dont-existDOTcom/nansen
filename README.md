@@ -65,6 +65,22 @@ The [`community-signal shadow`](research/experiments/2026-08-16-community-signal
 
 The [`paper-strategy feasibility evaluation`](research/experiments/2026-08-17-paper-strategy-feasibility/REPORT.md) is a schema-v3 offline comparison of preregistered theories. It selected no entry strategy, so it emitted no paper shortlist; its holder-breadth comparison advanced only as a descriptive follow-up. The next evidence upgrade is a separately versioned historical/beta collection with complete point-in-time provenance, pagination, liquidity, quotes, and execution costs.
 
+The bounded historical-discovery workflow tests that holder-breadth lead on a
+fixed 20-token, eight-week daily cohort before a larger prospective spend. Init
+and check are offline; start is the only live step and enforces the fixed
+nine-request-attempt/twelve-credit ceiling:
+
+```bash
+./nansen-lab historical-init --experiment-dir research/experiments/EXPERIMENT_ID
+./nansen-lab historical-start --manifest research/experiments/EXPERIMENT_ID/manifest.json
+./nansen-lab historical-check --manifest research/experiments/EXPERIMENT_ID/manifest.json
+```
+
+This route uses a temporally anchored beta screener, point-in-time daily
+historical holdings, and independent chain-batched daily OHLCV outcomes. It is
+discovery-only: daily close proxies, liquidity known only at selection, and
+fixed cost sensitivities cannot establish an executable or profitable strategy.
+
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.
 
 The [`prospective GPT pilot successor`](research/experiments/2026-08-17-gpt-prospective-pilot-successor/REPORT.md) is a separately named terminal schema-v4 observation. The corrected OpenAI key passed the exact `gpt-5.6-sol` model-access preflight, but Nansen's free account response omitted the declared credit-use and remaining-balance headers, so the protocol stopped before selection or inference. Its [result review](docs/audits/2026-08-17-gpt-prospective-pilot-successor-result-review.md) explains why replay conservatively records one ambiguous call/credit even though the received cost header was zero.

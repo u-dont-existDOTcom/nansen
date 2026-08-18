@@ -278,19 +278,39 @@ def test_confirmed_zero_releases_and_positive_use_consumes_exact_totals(tmp_path
     assert totals.entries[-1].response_artifact_sha256 == response_sha256
 
 
-def test_confirmed_billable_zero_releases_both_totals(tmp_path):
+def test_successful_billable_zero_is_pricing_drift(tmp_path):
     guard = BudgetGuard(tmp_path)
     establish_account_baseline(guard)
     reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
     response = evidence(cost=1, used=0, remaining=10)
-    guard.confirm(
-        reservation,
-        response,
-        response_artifact_sha256=response_artifact(guard, reservation, response),
-    )
+    with pytest.raises(BudgetError, match="pricing cost/use drift"):
+        guard.confirm(
+            reservation,
+            response,
+            response_artifact_sha256=response_artifact(guard, reservation, response),
+        )
 
-    assert (guard.replay().calls, guard.replay().credits) == (0, 0)
-    assert guard.replay().entries[-1].state == "confirmed_zero"
+    assert (guard.replay().calls, guard.replay().credits) == (1, 1)
+    assert guard.replay().entries[-1].state == "ambiguous"
+
+
+def test_multi_credit_response_requires_cost_and_use_to_match_reservation(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    establish_account_baseline(guard)
+    reservation = guard.reserve("historical", request_hash(1), "historical", 5)
+    response = evidence(cost=5, used=1, remaining=9)
+
+    with pytest.raises(BudgetError, match="pricing cost/use drift"):
+        guard.confirm(
+            reservation,
+            response,
+            response_artifact_sha256=response_artifact(guard, reservation, response),
+        )
+
+    totals = guard.replay()
+    assert totals.entries[-1].state == "confirmed_used"
+    assert totals.credits == 1
+    assert totals.halted_reason == "pricing cost/use drift"
 
 
 def test_rejects_eleventh_call_and_reservation_above_ten_credits(tmp_path):
@@ -304,6 +324,27 @@ def test_rejects_eleventh_call_and_reservation_above_ten_credits(tmp_path):
     credit_guard.reserve("large", request_hash(20), "tgm/flows", 10)
     with pytest.raises(BudgetError, match="credit ceiling"):
         credit_guard.reserve("extra", request_hash(21), "tgm/flows", 1)
+
+
+def test_confirms_multi_credit_endpoint_against_its_reserved_contract(tmp_path):
+    guard = BudgetGuard(tmp_path / "multi-credit", max_calls=2, max_credits=7)
+    establish_account_baseline(guard, remaining=10)
+    reservation = guard.reserve(
+        "historical-screener",
+        request_hash(99),
+        "v1beta1/token-screener/historical",
+        5,
+    )
+    observed = evidence(cost=5, used=5, remaining=5)
+    guard.confirm(
+        reservation,
+        observed,
+        response_artifact_sha256=response_artifact(guard, reservation, observed),
+    )
+
+    totals = guard.replay()
+    assert (totals.calls, totals.credits, totals.provider_remaining) == (1, 5, 5)
+    assert totals.entries[-1].state == "confirmed_used"
 
 
 def test_fail_releases_zero_consumes_positive_and_conserves_ambiguous(tmp_path):

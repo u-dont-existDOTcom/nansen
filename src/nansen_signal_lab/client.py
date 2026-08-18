@@ -11,7 +11,8 @@ from typing import Any
 
 import httpx
 
-BASE_URL = "https://api.nansen.ai/api/v1"
+API_ROOT = "https://api.nansen.ai/api"
+BASE_URL = f"{API_ROOT}/v1"
 
 
 class NansenError(RuntimeError):
@@ -56,6 +57,23 @@ class NansenResponse:
 
 def _utc_now_text() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _endpoint_url(endpoint: str) -> str:
+    """Resolve stable logical IDs and explicit provider API versions safely."""
+    normalized = endpoint.strip("/")
+    parts = normalized.split("/")
+    if (
+        not normalized
+        or any(part in {"", ".", ".."} for part in parts)
+        or "://" in normalized
+        or "?" in normalized
+        or "#" in normalized
+    ):
+        raise NansenError("endpoint must be a normalized relative endpoint ID")
+    if parts[0] in {"v1", "v1beta1"}:
+        return f"{API_ROOT}/{normalized}"
+    return f"{BASE_URL}/{normalized}"
 
 
 _EVIDENCE_HEADERS = (
@@ -182,7 +200,7 @@ class NansenClient:
 
         with httpx.Client(timeout=60.0) as client:
             response = client.post(
-                f"{BASE_URL}/{endpoint.lstrip('/')}",
+                _endpoint_url(endpoint),
                 headers={"apikey": self.api_key, "Content-Type": "application/json"},
                 json=payload,
             )
@@ -248,7 +266,7 @@ class NansenClient:
             with httpx.Client(timeout=60.0) as client:
                 response = client.request(
                     method.upper(),
-                    f"{BASE_URL}/{normalized_endpoint}",
+                    _endpoint_url(normalized_endpoint),
                     **request_kwargs,
                 )
         except (httpx.ConnectError, httpx.ConnectTimeout) as exc:

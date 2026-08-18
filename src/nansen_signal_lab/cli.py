@@ -25,6 +25,15 @@ from .prospective_schema import load_prospective_manifest
 from .evaluation import evaluate_manifest
 from .experiment import analyze_manifest
 from .metrics import accumulation_class, flow_market_cap_ratio
+from .historical_discovery import (
+    DESIGN_PATH as HISTORICAL_DESIGN_PATH,
+    MAX_CALLS as HISTORICAL_MAX_CALLS,
+    MAX_CREDITS as HISTORICAL_MAX_CREDITS,
+    check_historical_discovery,
+    initialize_historical_discovery,
+    load_historical_manifest,
+    start_historical_discovery,
+)
 
 DEFAULT_CHAINS = ["solana", "ethereum", "base", "bnb", "arbitrum"]
 
@@ -332,6 +341,48 @@ def cmd_pilot_check(args):
         print(f"verified: {path}")
 
 
+def cmd_historical_init(args):
+    path = initialize_historical_discovery(
+        Path(args.experiment_dir),
+        created_at=datetime.now(timezone.utc),
+        design_path=Path(__file__).resolve().parents[2] / HISTORICAL_DESIGN_PATH,
+    )
+    print(f"initialized: {path}")
+    print("stage: preregistered")
+
+
+def cmd_historical_start(args):
+    load_historical_manifest(Path(args.manifest))
+    if (
+        args.max_nansen_calls != HISTORICAL_MAX_CALLS
+        or args.max_nansen_credits != HISTORICAL_MAX_CREDITS
+    ):
+        raise ValueError(
+            "historical discovery ceilings are fixed at "
+            f"{HISTORICAL_MAX_CALLS} request attempts and "
+            f"{HISTORICAL_MAX_CREDITS} credits"
+        )
+    print(
+        "Nansen hard ceiling: "
+        f"{HISTORICAL_MAX_CALLS} authenticated request attempts / "
+        f"{HISTORICAL_MAX_CREDITS} credits"
+    )
+    result = start_historical_discovery(
+        Path(args.manifest),
+        nansen=NansenClient(),
+        clock=lambda: datetime.now(timezone.utc),
+        sleep=time.sleep,
+    )
+    print(f"stage: {result['stage']}")
+    if result["terminal_reason"]:
+        print(f"reason: {result['terminal_reason']}")
+
+
+def cmd_historical_check(args):
+    for path in check_historical_discovery(Path(args.manifest)):
+        print(f"verified: {path}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="nansen-lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -425,12 +476,29 @@ def build_parser():
     s = sub.add_parser("pilot-check", help="verify a prospective pilot offline")
     s.add_argument("--manifest", required=True)
     s.set_defaults(func=cmd_pilot_check)
+
+    s = sub.add_parser("historical-init", help="initialize holder-breadth discovery offline")
+    s.add_argument("--experiment-dir", required=True)
+    s.set_defaults(func=cmd_historical_init)
+
+    s = sub.add_parser("historical-start", help="collect bounded historical discovery evidence")
+    s.add_argument("--manifest", required=True)
+    s.add_argument("--max-nansen-calls", type=int, default=HISTORICAL_MAX_CALLS)
+    s.add_argument("--max-nansen-credits", type=int, default=HISTORICAL_MAX_CREDITS)
+    s.set_defaults(func=cmd_historical_start)
+
+    s = sub.add_parser("historical-check", help="verify historical discovery offline")
+    s.add_argument("--manifest", required=True)
+    s.set_defaults(func=cmd_historical_check)
     return p
 
 
 def main():
     args = build_parser().parse_args()
-    offline_commands = {"evaluate", "pilot-init", "pilot-replay", "pilot-check"}
+    offline_commands = {
+        "evaluate", "pilot-init", "pilot-replay", "pilot-check",
+        "historical-init", "historical-check",
+    }
     if args.cmd not in offline_commands:
         load_dotenv()
     args.func(args)

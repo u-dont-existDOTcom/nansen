@@ -726,13 +726,15 @@ def _settle_nansen_failure(
     failure: NansenRequestFailure,
     *,
     failure_artifact_sha256: str | None,
+    allow_retry: bool = True,
 ) -> BudgetReservation:
     response = failure.response
     retry_after = (
         None if response is None else response.response_headers.get("Retry-After")
     )
     if (
-        response is not None
+        allow_retry
+        and response is not None
         and response.status_code == 429
         and response.credit_used == 0
         and not response.credit_header_errors
@@ -774,6 +776,7 @@ def _account_baseline_derivation(
     response: NansenEvidenceResponse,
     response_metadata_path: Path,
     openapi_sha256: str,
+    minimum_remaining: int,
     clock: Callable[[], datetime],
 ) -> Path | None:
     body = response.body
@@ -786,7 +789,7 @@ def _account_baseline_derivation(
         and body.get("plan") in {"free", "pro"}
         and isinstance(body_remaining, int)
         and not isinstance(body_remaining, bool)
-        and body_remaining >= 10
+        and body_remaining >= minimum_remaining
         and not response.credit_header_errors
         and response.credit_cost == 0
         and response.credit_used in {None, 0}
@@ -837,6 +840,7 @@ def _confirm_nansen_success(
     response_metadata_path: Path,
     account_baseline_version: str | None,
     openapi_sha256: str | None,
+    account_minimum_remaining: int,
     clock: Callable[[], datetime],
 ) -> tuple[Path, ...]:
     response_hash = _sha256_file(response_metadata_path)
@@ -860,13 +864,14 @@ def _confirm_nansen_success(
         response=response,
         response_metadata_path=response_metadata_path,
         openapi_sha256=openapi_sha256,
+        minimum_remaining=account_minimum_remaining,
         clock=clock,
     )
     guard.confirm_account_baseline(
         reservation,
         response,
         response_artifact_sha256=response_hash,
-        minimum_remaining=10,
+        minimum_remaining=account_minimum_remaining,
     )
     if derivation is None:
         raise PilotError("account fallback did not produce its derivation artifact")
@@ -887,6 +892,8 @@ def _nansen_call(
     sleep: Callable[[float], None],
     account_baseline_version: str | None = None,
     openapi_sha256: str | None = None,
+    account_minimum_remaining: int = 10,
+    allow_retry: bool = True,
 ) -> tuple[NansenEvidenceResponse, tuple[Path, ...]]:
     request_sha256 = canonical_request_sha256(method, endpoint, payload)
     reservation = guard.reserve(
@@ -978,6 +985,7 @@ def _nansen_call(
                             response=response,
                         ),
                         failure_artifact_sha256=response_hash,
+                        allow_retry=allow_retry,
                     )
                     continue
                 _confirm_nansen_success(
@@ -988,6 +996,7 @@ def _nansen_call(
                     response_metadata_path=metadata_path,
                     account_baseline_version=account_baseline_version,
                     openapi_sha256=openapi_sha256,
+                    account_minimum_remaining=account_minimum_remaining,
                     clock=clock,
                 )
                 reservation = _entry_for(guard, logical_request_id) or reservation
@@ -1015,6 +1024,7 @@ def _nansen_call(
                 reservation,
                 failure,
                 failure_artifact_sha256=failure_hash,
+                allow_retry=allow_retry,
             )
             continue
 
@@ -1029,6 +1039,7 @@ def _nansen_call(
             response_metadata_path=metadata,
             account_baseline_version=account_baseline_version,
             openapi_sha256=openapi_sha256,
+            account_minimum_remaining=account_minimum_remaining,
             clock=clock,
         )
         return response, (request_path, archived, metadata, *extra)

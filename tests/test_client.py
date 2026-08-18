@@ -154,6 +154,52 @@ def test_evidence_request_get_sends_no_body_and_uses_one_relative_prefix(tmp_pat
     assert requests[0].content == b""
 
 
+def test_evidence_request_supports_explicit_beta_version_without_double_prefix(
+    tmp_path, monkeypatch
+):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"data": [], "pagination": {"page": 1, "per_page": 1000, "is_last_page": True}},
+            headers={
+                "X-Nansen-Credits-Cost": "5",
+                "X-Nansen-Credits-Used": "5",
+                "X-Nansen-Credits-Remaining": "70",
+            },
+        )
+
+    install_transport(monkeypatch, handler)
+    NansenClient(api_key="test", cache_dir=tmp_path / "absent").request_evidence(
+        "POST",
+        "v1beta1/token-screener/historical",
+        {"to_date": "2026-06-01"},
+        caller_request_id="historical-screener-1",
+    )
+
+    assert len(requests) == 1
+    assert requests[0].url.path == "/api/v1beta1/token-screener/historical"
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["../v1/account", "v1beta1/../account", "https://example.invalid", "v1/account?x=1"],
+)
+def test_evidence_request_rejects_unsafe_endpoint_before_transport(
+    tmp_path, monkeypatch, endpoint
+):
+    def handler(request):
+        raise AssertionError("unsafe endpoint reached transport")
+
+    install_transport(monkeypatch, handler)
+    with pytest.raises((ValueError, RuntimeError), match="endpoint"):
+        NansenClient(api_key="test", cache_dir=tmp_path).request_evidence(
+            "GET", endpoint, None, caller_request_id="unsafe"
+        )
+
+
 @pytest.mark.parametrize(
     ("status", "raw", "parse_status", "body"),
     [
