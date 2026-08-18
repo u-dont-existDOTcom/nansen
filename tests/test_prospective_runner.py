@@ -24,6 +24,7 @@ def _repo(tmp_path: Path) -> Path:
         shutil.copytree(ROOT / "research/experiments" / name, experiments / name)
     for relative in (
         "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md",
+        "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md",
         "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
     ):
         target = repo / relative
@@ -257,6 +258,191 @@ def test_initialize_pilot_creates_offline_preregistered_bundle(tmp_path):
     assert (bundle.root / "PREREGISTRATION.md").is_file()
     assert not (bundle.root / "REPORT.md").exists()
     assert bundle.root / "PREREGISTRATION.md" in check_pilot(bundle)
+
+
+def test_v2_account_fallback_is_explicitly_preregistered_and_auditable(tmp_path):
+    from dataclasses import replace
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot, start_pilot
+
+    class AccountHeadersOmitted(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            if endpoint != "account":
+                return response
+            headers = {
+                "X-Request-Id": caller_request_id,
+                "X-Nansen-Credits-Cost": "0",
+            }
+            return replace(
+                response,
+                response_headers=headers,
+                credit_used=None,
+                credit_remaining=None,
+            )
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/fallback-v2-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+        protocol_version="account-baseline-v2",
+    )
+    assert bundle.manifest["design_path"].endswith("account-baseline-v2.md")
+
+    decision = start_pilot(
+        bundle,
+        nansen=AccountHeadersOmitted(),
+        openai=FakeOpenAI(),
+        clock=lambda: datetime(2026, 8, 17, 10, 37, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+
+    assert decision.manifest["stage"] == "decision_sealed"
+    derivation_path = decision.root / "derived/account-baseline.json"
+    derivation = json.loads(derivation_path.read_text())
+    assert derivation["rule_version"] == "account-baseline-v2"
+    assert derivation["observed"] == {
+        "credit_cost": 0,
+        "credit_remaining": None,
+        "credit_used": None,
+    }
+    assert derivation["effective"] == {
+        "credit_cost": 0,
+        "credit_remaining": 10,
+        "credit_used": 0,
+    }
+    assert any(
+        item["path"] == "derived/account-baseline.json"
+        for item in decision.manifest["artifacts"]
+    )
+    budget = json.loads((decision.root / "budget/head.json").read_text())
+    account = next(
+        item for item in budget["entries"]
+        if item["logical_request_id"] == "account-preflight"
+    )
+    assert account["state"] == "confirmed_zero"
+    assert account["credit_used"] == 0
+    assert account["credit_remaining"] == 10
+
+
+def test_v2_fallback_does_not_relax_paid_response_headers(tmp_path):
+    from dataclasses import replace
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot, start_pilot
+
+    class MissingPaidHeader(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            if endpoint == "token-screener":
+                headers = dict(response.response_headers)
+                headers.pop("X-Nansen-Credits-Remaining")
+                return replace(
+                    response,
+                    response_headers=headers,
+                    credit_remaining=None,
+                )
+            return response
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/paid-strict-v2-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+        protocol_version="account-baseline-v2",
+    )
+    nansen = MissingPaidHeader()
+    final = start_pilot(
+        bundle,
+        nansen=nansen,
+        openai=FakeOpenAI(),
+        clock=lambda: datetime(2026, 8, 17, 10, 37, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+
+    assert final.manifest["stage"] == "unscorable"
+    assert [
+        endpoint for method, endpoint, _ in nansen.calls if method != "OPENAPI"
+    ] == ["account", "token-screener"]
+    assert "pricing evidence is incomplete" in (final.root / "REPORT.md").read_text()
+
+
+def test_v2_fallback_recovers_archived_response_without_retransmission(
+    tmp_path, monkeypatch
+):
+    from dataclasses import replace
+    from src.nansen_signal_lab import prospective_runner
+    from src.nansen_signal_lab.budget import BudgetGuard
+    from src.nansen_signal_lab.prospective_runner import _nansen_call, initialize_pilot
+
+    class AccountHeadersOmitted(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            assert endpoint == "account"
+            return replace(
+                response,
+                response_headers={
+                    "X-Request-Id": caller_request_id,
+                    "X-Nansen-Credits-Cost": "0",
+                },
+                credit_used=None,
+                credit_remaining=None,
+            )
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/fallback-recovery-v2-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+        protocol_version="account-baseline-v2",
+    )
+    guard = BudgetGuard(bundle.root)
+    nansen = AccountHeadersOmitted()
+    original_confirm = BudgetGuard.confirm_account_baseline
+
+    def interrupt_before_ledger_confirm(*_args, **_kwargs):
+        raise KeyboardInterrupt("fixture interruption after fallback derivation")
+
+    monkeypatch.setattr(
+        BudgetGuard, "confirm_account_baseline", interrupt_before_ledger_confirm
+    )
+    with pytest.raises(KeyboardInterrupt, match="after fallback derivation"):
+        _nansen_call(
+            root=bundle.root,
+            guard=guard,
+            nansen=nansen,
+            logical_request_id="account-preflight",
+            method="GET",
+            endpoint="account",
+            payload=None,
+            expected_credits=1,
+            clock=lambda: datetime(2026, 8, 17, 10, 37, tzinfo=timezone.utc),
+            sleep=lambda _seconds: None,
+            account_baseline_version="account-baseline-v2",
+            openapi_sha256=hashlib.sha256(OPENAPI_RAW).hexdigest(),
+        )
+    assert len([call for call in nansen.calls if call[0] != "OPENAPI"]) == 1
+    assert (bundle.root / "derived/account-baseline.json").is_file()
+
+    monkeypatch.setattr(BudgetGuard, "confirm_account_baseline", original_confirm)
+    response, paths = _nansen_call(
+        root=bundle.root,
+        guard=BudgetGuard(bundle.root),
+        nansen=nansen,
+        logical_request_id="account-preflight",
+        method="GET",
+        endpoint="account",
+        payload=None,
+        expected_credits=1,
+        clock=lambda: datetime(2026, 8, 17, 10, 38, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+        account_baseline_version="account-baseline-v2",
+        openapi_sha256=hashlib.sha256(OPENAPI_RAW).hexdigest(),
+    )
+
+    assert response.credit_remaining is None
+    assert bundle.root / "derived/account-baseline.json" in paths
+    assert len([call for call in nansen.calls if call[0] != "OPENAPI"]) == 1
+    totals = BudgetGuard(bundle.root).replay()
+    assert (totals.calls, totals.credits, totals.provider_remaining) == (0, 0, 10)
 
 
 def test_full_fake_lifecycle_uses_exact_billable_calls_and_replays_offline(tmp_path):

@@ -66,6 +66,11 @@ class PilotError(RuntimeError):
 
 _SOURCE_PATH = "../2026-08-17-paper-strategy-feasibility/manifest.json"
 _DESIGN_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md"
+_DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md"
+_PROTOCOL_DESIGNS = {
+    "strict-v1": _DESIGN_PATH,
+    "account-baseline-v2": _DESIGN_V2_PATH,
+}
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _EVIDENCE_TIMESTAMP_FIELDS = {
     "request_started_at",
@@ -208,6 +213,7 @@ def initialize_pilot(
     experiment_root: Path,
     *,
     created_at: datetime,
+    protocol_version: str = "strict-v1",
 ) -> ProspectiveBundle:
     root = Path(os.path.abspath(os.fspath(experiment_root)))
     created = _utc(created_at, field="created_at")
@@ -219,7 +225,10 @@ def initialize_pilot(
     root.mkdir(parents=True, exist_ok=True)
 
     source = root / _SOURCE_PATH
-    design = root / _DESIGN_PATH
+    if protocol_version not in _PROTOCOL_DESIGNS:
+        raise PilotError(f"unsupported prospective protocol: {protocol_version}")
+    design_path = _PROTOCOL_DESIGNS[protocol_version]
+    design = root / design_path
     contract = root / _CONTRACT_PATH
     for label, path in (
         ("source strategy manifest", source),
@@ -243,7 +252,8 @@ def initialize_pilot(
         "six frozen records on one common four-hour paper outcome. A tie is not a "
         "win; unavailable comparison evidence is not zero. This is a one-token, "
         "one-observation pilot and cannot establish advancement.\n\n"
-        "Design: `../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md`.\n"
+        f"Protocol: `{protocol_version}`.\n\n"
+        f"Design: `{design_path}`.\n"
     ).encode("utf-8")
     preregistration_text = _install_bytes(
         root / "PREREGISTRATION.md",
@@ -256,6 +266,7 @@ def initialize_pilot(
         "created_at": timestamp,
         "artifact_written_at": timestamp,
         "status": "preregistered",
+        "protocol_version": protocol_version,
         "model": {
             "id": "gpt-5.6-sol",
             "passes": 2,
@@ -332,7 +343,7 @@ def initialize_pilot(
         "source_strategy_manifest_sha256": source_sha256,
         "preregistration_path": "preregistration.json",
         "preregistration_sha256": _sha256_file(preregistration_path),
-        "design_path": _DESIGN_PATH,
+        "design_path": design_path,
         "design_sha256": _sha256_file(design),
         "nansen_contract_path": _CONTRACT_PATH,
         "nansen_contract_sha256": _sha256_file(contract),
@@ -500,6 +511,111 @@ def _settle_nansen_failure(
     raise PilotError(str(failure)) from failure
 
 
+def _account_baseline_derivation(
+    *,
+    root: Path,
+    response: NansenEvidenceResponse,
+    response_metadata_path: Path,
+    openapi_sha256: str,
+    clock: Callable[[], datetime],
+) -> Path | None:
+    body = response.body
+    body_remaining = (
+        body.get("credits_remaining") if isinstance(body, dict) else None
+    )
+    eligible = (
+        response.body_parse_status == "json_object"
+        and isinstance(body, dict)
+        and body.get("plan") in {"free", "pro"}
+        and isinstance(body_remaining, int)
+        and not isinstance(body_remaining, bool)
+        and body_remaining >= 10
+        and not response.credit_header_errors
+        and response.credit_cost == 0
+        and response.credit_used in {None, 0}
+        and response.credit_remaining in {None, body_remaining}
+    )
+    if not eligible:
+        return None
+    if len(openapi_sha256) != 64 or any(
+        character not in "0123456789abcdef" for character in openapi_sha256
+    ):
+        raise PilotError("account fallback requires the matched OpenAPI SHA-256")
+    assert isinstance(body, dict)
+    assert isinstance(body_remaining, int)
+    return _install_timestamped_json(
+        root / "derived/account-baseline.json",
+        {
+            "schema_version": 1,
+            "rule_version": "account-baseline-v2",
+            "openapi_sha256": openapi_sha256,
+            "response_metadata_path": response_metadata_path.relative_to(root).as_posix(),
+            "response_metadata_sha256": _sha256_file(response_metadata_path),
+            "body": {
+                "plan": body["plan"],
+                "credits_remaining": body_remaining,
+            },
+            "observed": {
+                "credit_cost": response.credit_cost,
+                "credit_used": response.credit_used,
+                "credit_remaining": response.credit_remaining,
+            },
+            "effective": {
+                "credit_cost": 0,
+                "credit_used": 0,
+                "credit_remaining": body_remaining,
+            },
+        },
+        kind="account_baseline_derivation",
+        clock=clock,
+    )
+
+
+def _confirm_nansen_success(
+    *,
+    root: Path,
+    guard: BudgetGuard,
+    reservation: BudgetReservation,
+    response: NansenEvidenceResponse,
+    response_metadata_path: Path,
+    account_baseline_version: str | None,
+    openapi_sha256: str | None,
+    clock: Callable[[], datetime],
+) -> tuple[Path, ...]:
+    response_hash = _sha256_file(response_metadata_path)
+    fallback_needed = (
+        account_baseline_version == "account-baseline-v2"
+        and reservation.endpoint == "account"
+        and (response.credit_used is None or response.credit_remaining is None)
+    )
+    if not fallback_needed:
+        guard.confirm(
+            reservation,
+            response,
+            response_artifact_sha256=response_hash,
+        )
+        return ()
+
+    if openapi_sha256 is None:
+        raise PilotError("account fallback requires a matched OpenAPI contract")
+    derivation = _account_baseline_derivation(
+        root=root,
+        response=response,
+        response_metadata_path=response_metadata_path,
+        openapi_sha256=openapi_sha256,
+        clock=clock,
+    )
+    guard.confirm_account_baseline(
+        reservation,
+        response,
+        response_artifact_sha256=response_hash,
+        minimum_remaining=10,
+    )
+    if derivation is None:
+        raise PilotError("account fallback did not produce its derivation artifact")
+    return (derivation,)
+
+
 def _nansen_call(
     *,
     root: Path,
@@ -512,6 +628,8 @@ def _nansen_call(
     expected_credits: int,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
+    account_baseline_version: str | None = None,
+    openapi_sha256: str | None = None,
 ) -> tuple[NansenEvidenceResponse, tuple[Path, ...]]:
     request_sha256 = canonical_request_sha256(method, endpoint, payload)
     reservation = guard.reserve(
@@ -521,7 +639,17 @@ def _nansen_call(
         request_path, response_path, metadata_path = _nansen_paths(root, reservation)
         if reservation.state in {"confirmed_zero", "confirmed_used"}:
             response = _load_nansen_response(response_path, metadata_path)
-            return response, (request_path, response_path, metadata_path)
+            extra: tuple[Path, ...] = ()
+            if (
+                account_baseline_version == "account-baseline-v2"
+                and reservation.endpoint == "account"
+                and (response.credit_used is None or response.credit_remaining is None)
+            ):
+                derivation = root / "derived/account-baseline.json"
+                if not derivation.is_file() or derivation.is_symlink():
+                    raise PilotError("confirmed account fallback lacks its derivation artifact")
+                extra = (derivation,)
+            return response, (request_path, response_path, metadata_path, *extra)
         if reservation.state == "retryable_zero":
             deadline = _parse_time(
                 reservation.retry_not_before, field="Nansen retry deadline"
@@ -595,8 +723,15 @@ def _nansen_call(
                         failure_artifact_sha256=response_hash,
                     )
                     continue
-                guard.confirm(
-                    reservation, response, response_artifact_sha256=response_hash
+                _confirm_nansen_success(
+                    root=root,
+                    guard=guard,
+                    reservation=reservation,
+                    response=response,
+                    response_metadata_path=metadata_path,
+                    account_baseline_version=account_baseline_version,
+                    openapi_sha256=openapi_sha256,
+                    clock=clock,
                 )
                 reservation = _entry_for(guard, logical_request_id) or reservation
                 continue
@@ -629,12 +764,17 @@ def _nansen_call(
         archived, metadata = _archive_nansen_response(
             root, reservation, response, clock=clock
         )
-        guard.confirm(
-            reservation,
-            response,
-            response_artifact_sha256=_sha256_file(metadata),
+        extra = _confirm_nansen_success(
+            root=root,
+            guard=guard,
+            reservation=reservation,
+            response=response,
+            response_metadata_path=metadata,
+            account_baseline_version=account_baseline_version,
+            openapi_sha256=openapi_sha256,
+            clock=clock,
         )
-        return response, (request_path, archived, metadata)
+        return response, (request_path, archived, metadata, *extra)
 
 
 def _snapshot_body(response: NansenEvidenceResponse) -> dict[str, Any]:
@@ -992,6 +1132,12 @@ def start_pilot(
             artifacts=pre_snapshot_artifacts,
             clock=clock,
         )
+    matched_openapi_sha256 = _sha256_bytes(openapi_raw)
+    account_baseline_version = (
+        "account-baseline-v2"
+        if current.manifest["design_path"] == _DESIGN_V2_PATH
+        else None
+    )
 
     writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
     try:
@@ -1018,6 +1164,8 @@ def start_pilot(
             expected_credits=1,
             clock=clock,
             sleep=sleep,
+            account_baseline_version=account_baseline_version,
+            openapi_sha256=matched_openapi_sha256,
         )
         pre_snapshot_artifacts.extend(paths)
     except Exception as exc:
@@ -1029,6 +1177,7 @@ def start_pilot(
             clock=clock,
         )
     body = account.body
+    account_entry = _entry_for(guard, "account-preflight")
     if (
         not isinstance(body, dict)
         or not isinstance(body.get("plan"), str)
@@ -1036,9 +1185,11 @@ def start_pilot(
         or not isinstance(body.get("credits_remaining"), int)
         or isinstance(body.get("credits_remaining"), bool)
         or body["credits_remaining"] < 10
-        or body["credits_remaining"] != account.credit_remaining
-        or account.credit_cost != 0
-        or account.credit_used != 0
+        or account_entry is None
+        or account_entry.state != "confirmed_zero"
+        or account_entry.credit_cost != 0
+        or account_entry.credit_used != 0
+        or account_entry.credit_remaining != body["credits_remaining"]
     ):
         return _terminal_unscorable(
             current,

@@ -108,6 +108,103 @@ def establish_account_baseline(guard: BudgetGuard, remaining: int = 10) -> None:
     )
 
 
+def account_evidence(
+    *,
+    cost: int | None = 0,
+    used: int | None = None,
+    header_remaining: int | None = None,
+    body_remaining: int = 10,
+) -> NansenEvidenceResponse:
+    body = {"plan": "free", "credits_remaining": body_remaining}
+    raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    base = evidence(cost=cost, used=used, remaining=header_remaining)
+    return NansenEvidenceResponse(
+        body=body,
+        body_parse_status="json_object",
+        raw_body=raw,
+        status_code=base.status_code,
+        request_started_at=base.request_started_at,
+        response_retrieved_at=base.response_retrieved_at,
+        response_headers=base.response_headers,
+        request_id=base.request_id,
+        credit_cost=cost,
+        credit_used=used,
+        credit_remaining=header_remaining,
+        credit_header_errors=(),
+    )
+
+
+def test_account_only_fallback_uses_zero_cost_contract_and_body_balance(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    reservation = guard.reserve("account", request_hash(0), "account", 1)
+    response = account_evidence(body_remaining=90)
+
+    guard.confirm_account_baseline(
+        reservation,
+        response,
+        response_artifact_sha256=response_artifact(guard, reservation, response),
+        minimum_remaining=10,
+    )
+
+    totals = guard.replay()
+    assert (totals.calls, totals.credits, totals.provider_remaining) == (0, 0, 90)
+    assert totals.entries[0].state == "confirmed_zero"
+    assert totals.entries[0].credit_cost == 0
+    assert totals.entries[0].credit_used == 0
+    assert totals.entries[0].credit_remaining == 90
+
+
+@pytest.mark.parametrize(
+    ("cost", "used", "header_remaining", "body_remaining"),
+    [
+        (None, None, None, 90),
+        (1, None, None, 90),
+        (0, 1, None, 90),
+        (0, None, 89, 90),
+        (0, None, None, 9),
+    ],
+)
+def test_account_fallback_rejects_unproved_zero_cost_or_balance(
+    tmp_path, cost, used, header_remaining, body_remaining
+):
+    guard = BudgetGuard(tmp_path)
+    reservation = guard.reserve("account", request_hash(0), "account", 1)
+    response = account_evidence(
+        cost=cost,
+        used=used,
+        header_remaining=header_remaining,
+        body_remaining=body_remaining,
+    )
+
+    with pytest.raises(BudgetError, match="pricing"):
+        guard.confirm_account_baseline(
+            reservation,
+            response,
+            response_artifact_sha256=response_artifact(
+                guard, reservation, response
+            ),
+            minimum_remaining=10,
+        )
+
+    assert guard.replay().entries[0].state == "ambiguous"
+
+
+def test_account_fallback_is_forbidden_for_paid_endpoints(tmp_path):
+    guard = BudgetGuard(tmp_path)
+    reservation = guard.reserve("screen", request_hash(1), "token-screener", 1)
+    response = account_evidence(body_remaining=90)
+
+    with pytest.raises(BudgetError, match="account"):
+        guard.confirm_account_baseline(
+            reservation,
+            response,
+            response_artifact_sha256=response_artifact(
+                guard, reservation, response
+            ),
+            minimum_remaining=10,
+        )
+
+
 def test_confirm_refuses_changed_response_metadata_even_when_raw_bytes_match(tmp_path):
     guard = BudgetGuard(tmp_path)
     reservation = guard.reserve("account", request_hash(0), "account", 1)

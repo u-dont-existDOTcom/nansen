@@ -264,7 +264,9 @@ def cmd_evaluate(args):
 
 def cmd_pilot_init(args):
     bundle = initialize_pilot(
-        Path(args.experiment_dir), created_at=datetime.now(timezone.utc)
+        Path(args.experiment_dir),
+        created_at=datetime.now(timezone.utc),
+        protocol_version=args.protocol_version,
     )
     print(f"initialized: {bundle.manifest_path}")
     print(f"stage: {bundle.manifest['stage']}")
@@ -372,6 +374,11 @@ def build_parser():
 
     s = sub.add_parser("pilot-init", help="initialize the prospective GPT pilot offline")
     s.add_argument("--experiment-dir", required=True)
+    s.add_argument(
+        "--protocol-version",
+        choices=("strict-v1", "account-baseline-v2"),
+        default="strict-v1",
+    )
     s.set_defaults(func=cmd_pilot_init)
 
     s = sub.add_parser("pilot-start", help="collect and seal the prospective decision")

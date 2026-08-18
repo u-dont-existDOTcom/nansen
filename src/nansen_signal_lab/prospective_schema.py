@@ -108,6 +108,8 @@ _MARKER_KEYS = {
 }
 _SOURCE_PATH = "../2026-08-17-paper-strategy-feasibility/manifest.json"
 _DESIGN_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md"
+_DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md"
+_DESIGN_PATHS = {_DESIGN_PATH, _DESIGN_V2_PATH}
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _HEX = frozenset("0123456789abcdef")
 _TIMESTAMP_FIELDS = {
@@ -530,12 +532,15 @@ def _validate_manifest_fields(root: Path, manifest: Any) -> dict[str, Any]:
     except Exception as exc:
         raise ProspectiveError(f"invalid source strategy manifest: {exc}") from exc
 
+    design_text = _string(manifest["design_path"], field="design_path")
+    if design_text not in _DESIGN_PATHS:
+        raise ProspectiveError("design_path must name a supported pinned pilot design")
     design = _external_ref(
         root,
-        manifest["design_path"],
+        design_text,
         label="design_path",
-        exact=_DESIGN_PATH,
-        expected=repo_root / _DESIGN_PATH.removeprefix("../../../"),
+        exact=design_text,
+        expected=repo_root / design_text.removeprefix("../../../"),
     )
     design_hash = _hash(manifest["design_sha256"], field="design_sha256")
     if _sha256_file(design) != design_hash:

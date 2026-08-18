@@ -813,6 +813,100 @@ class BudgetGuard:
                     raise BudgetError(reason)
                 raise BudgetError(f"Nansen pricing validation failed: {reason}")
 
+    def confirm_account_baseline(
+        self,
+        reservation: BudgetReservation,
+        response: NansenEvidenceResponse,
+        *,
+        response_artifact_sha256: str,
+        minimum_remaining: int,
+    ) -> None:
+        """Confirm the versioned zero-cost account fallback.
+
+        The raw response remains unchanged in its archived artifact. Ledger fields
+        record the effective values proved by the zero-cost contract plus the
+        account body's authoritative balance. This method is intentionally
+        unusable for every other endpoint.
+        """
+        _require_hash(response_artifact_sha256, "response_artifact_sha256")
+        if (
+            not isinstance(minimum_remaining, int)
+            or isinstance(minimum_remaining, bool)
+            or minimum_remaining < 0
+        ):
+            raise BudgetError("minimum account balance must be a non-negative integer")
+        if reservation.endpoint != "account":
+            raise BudgetError("account baseline fallback is forbidden outside account")
+
+        with self._lock():
+            entries, hashes, provider_remaining, halted_reason = self._replay_locked()
+            current = self._current(reservation, entries, "reserved")
+            if current.endpoint != "account":
+                raise BudgetError("account baseline fallback is forbidden outside account")
+            self._verify_response_artifact(
+                current, response_artifact_sha256, response
+            )
+
+            body = response.body
+            plan = body.get("plan") if isinstance(body, dict) else None
+            body_remaining = (
+                body.get("credits_remaining") if isinstance(body, dict) else None
+            )
+            valid_body_remaining = (
+                isinstance(body_remaining, int)
+                and not isinstance(body_remaining, bool)
+                and body_remaining >= minimum_remaining
+            )
+            reason: str | None = None
+            if provider_remaining is not None:
+                reason = "account baseline is already established"
+            elif not 200 <= response.status_code < 300:
+                reason = "account baseline response was not successful"
+            elif response.body_parse_status != "json_object":
+                reason = "account baseline response was not a JSON object"
+            elif plan not in {"free", "pro"} or not valid_body_remaining:
+                reason = "account baseline body is invalid or insufficient"
+            elif response.credit_header_errors:
+                reason = "account baseline contains malformed pricing headers"
+            elif response.credit_cost != 0:
+                reason = "account baseline zero cost is not explicit"
+            elif response.credit_used not in {None, 0}:
+                reason = "account baseline reports nonzero use"
+            elif response.credit_remaining not in {None, body_remaining}:
+                reason = "account baseline header and body balances differ"
+
+            if reason is None:
+                assert isinstance(body_remaining, int)
+                updated = replace(
+                    current,
+                    state="confirmed_zero",
+                    retry_not_before=None,
+                    response_artifact_sha256=response_artifact_sha256,
+                    credit_cost=0,
+                    credit_used=0,
+                    credit_remaining=body_remaining,
+                )
+                next_remaining = body_remaining
+            else:
+                updated = self._settlement_entry(
+                    current,
+                    response,
+                    response_artifact_sha256,
+                    "ambiguous",
+                )
+                next_remaining = provider_remaining
+
+            self._commit_locked(
+                "confirm",
+                updated,
+                entries,
+                hashes,
+                next_remaining,
+                halted_reason or reason,
+            )
+            if reason is not None:
+                raise BudgetError(f"Nansen pricing validation failed: {reason}")
+
     def fail(
         self,
         reservation: BudgetReservation,
