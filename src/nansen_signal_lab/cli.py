@@ -43,6 +43,20 @@ from .historical_recovery import (
     load_historical_recovery_manifest,
     start_historical_recovery,
 )
+from .cohort_schema import (
+    MAX_CYCLE_CREDITS as COHORT_MAX_CYCLE_CREDITS,
+    MAX_PROGRAM_CREDITS as COHORT_MAX_PROGRAM_CREDITS,
+    budget_plan as cohort_budget_plan,
+    initialize_cohort_program,
+    load_cohort_program,
+)
+from .cohort_runner import (
+    check_program as check_cohort_program,
+    finalize_program as finalize_cohort_program,
+    replay_program as replay_cohort_program,
+    settle_cycle as settle_cohort_cycle,
+    start_cycle as start_cohort_cycle,
+)
 
 DEFAULT_CHAINS = ["solana", "ethereum", "base", "bnb", "arbitrum"]
 
@@ -434,6 +448,81 @@ def cmd_historical_recovery_check(args):
         print(f"verified: {path}")
 
 
+def cmd_cohort_plan(args):
+    plan = cohort_budget_plan(cycles=args.cycles, tokens=args.tokens)
+    print(json.dumps(plan, ensure_ascii=False, sort_keys=True, indent=2))
+    print("No API calls were made.")
+
+
+def cmd_cohort_init(args):
+    first = _parse_utc_timestamp(args.first_cycle_at)
+    program = initialize_cohort_program(
+        Path(args.experiment_dir),
+        created_at=datetime.now(timezone.utc),
+        first_cycle_at=first,
+    )
+    print(f"initialized: {program.manifest_path}")
+    print(f"first cycle: {program.manifest['schedule'][0]['scheduled_at']}")
+    print(f"hard program ceiling: {COHORT_MAX_PROGRAM_CREDITS} credits")
+
+
+def _cohort_program(path):
+    return load_cohort_program(Path(path))
+
+
+def _cohort_ceilings(args):
+    if (
+        args.max_cycle_credits != COHORT_MAX_CYCLE_CREDITS
+        or args.max_program_credits != COHORT_MAX_PROGRAM_CREDITS
+    ):
+        raise ValueError(
+            "cohort v1 ceilings are fixed at "
+            f"{COHORT_MAX_CYCLE_CREDITS} credits per cycle and "
+            f"{COHORT_MAX_PROGRAM_CREDITS} credits per program"
+        )
+
+
+def cmd_cohort_start_cycle(args):
+    _cohort_ceilings(args)
+    state = start_cohort_cycle(
+        _cohort_program(args.program),
+        args.cycle,
+        nansen=NansenClient(),
+        clock=lambda: datetime.now(timezone.utc),
+        sleep=time.sleep,
+    )
+    print(f"cycle {args.cycle}: {state['stage']}")
+    if state["terminal_reason"]:
+        print(f"reason: {state['terminal_reason']}")
+
+
+def cmd_cohort_settle_cycle(args):
+    _cohort_ceilings(args)
+    state = settle_cohort_cycle(
+        _cohort_program(args.program),
+        args.cycle,
+        nansen=NansenClient(),
+        clock=lambda: datetime.now(timezone.utc),
+        sleep=time.sleep,
+    )
+    print(f"cycle {args.cycle}: {state['stage']}")
+    if state["terminal_reason"]:
+        print(f"reason: {state['terminal_reason']}")
+
+
+def cmd_cohort_replay(args):
+    print(json.dumps(replay_cohort_program(_cohort_program(args.program)), sort_keys=True))
+
+
+def cmd_cohort_check(args):
+    print(json.dumps(check_cohort_program(_cohort_program(args.program)), sort_keys=True))
+
+
+def cmd_cohort_finalize(args):
+    path = finalize_cohort_program(_cohort_program(args.program))
+    print(f"finalized: {path}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="nansen-lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -564,6 +653,39 @@ def build_parser():
     )
     s.add_argument("--manifest", required=True)
     s.set_defaults(func=cmd_historical_recovery_check)
+
+    s = sub.add_parser("cohort-plan", help="show the fixed cohort budget offline")
+    s.add_argument("--cycles", type=int, default=32)
+    s.add_argument("--tokens", type=int, default=5)
+    s.set_defaults(func=cmd_cohort_plan)
+
+    s = sub.add_parser("cohort-init", help="initialize a funded cohort schedule offline")
+    s.add_argument("--experiment-dir", required=True)
+    s.add_argument("--first-cycle-at", required=True)
+    s.set_defaults(func=cmd_cohort_init)
+
+    for command, help_text, function in (
+        ("cohort-start-cycle", "collect and seal one cycle's decisions", cmd_cohort_start_cycle),
+        ("cohort-settle-cycle", "collect every counterfactual cycle outcome", cmd_cohort_settle_cycle),
+    ):
+        s = sub.add_parser(command, help=help_text)
+        s.add_argument("--program", required=True)
+        s.add_argument("--cycle", type=int, required=True)
+        s.add_argument("--max-cycle-credits", type=int, default=COHORT_MAX_CYCLE_CREDITS)
+        s.add_argument("--max-program-credits", type=int, default=COHORT_MAX_PROGRAM_CREDITS)
+        s.set_defaults(func=function)
+
+    s = sub.add_parser("cohort-replay", help="replay cohort stages and budgets offline")
+    s.add_argument("--program", required=True)
+    s.set_defaults(func=cmd_cohort_replay)
+
+    s = sub.add_parser("cohort-check", help="verify cohort archives and budgets offline")
+    s.add_argument("--program", required=True)
+    s.set_defaults(func=cmd_cohort_check)
+
+    s = sub.add_parser("cohort-finalize", help="unlock aggregate results after 32 terminal cycles")
+    s.add_argument("--program", required=True)
+    s.set_defaults(func=cmd_cohort_finalize)
     return p
 
 
@@ -573,6 +695,8 @@ def main():
         "evaluate", "pilot-init", "pilot-replay", "pilot-check",
         "historical-init", "historical-check",
         "historical-recovery-init", "historical-recovery-check",
+        "cohort-plan", "cohort-init", "cohort-replay", "cohort-check",
+        "cohort-finalize",
     }
     if args.cmd not in offline_commands:
         load_dotenv()

@@ -95,6 +95,46 @@ terminal; verify the recovery offline, but do not initialize or start another:
   --manifest research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/manifest.json
 ```
 
+The next experiment family is a separate 32-cycle prospective cohort. It uses
+five deterministic strata per cycle, complete Smart-Money/exchange flow and
+buyer/seller breadth, frozen pre-entry decisions, and the same counterfactual
+DEX/OHLCV outcome for every selected token—including abstentions. The full
+program is an untouched holdout; it never trains a replacement rule from its
+own returns. Its sole confirmatory rule is buyer-breadth/exchange co-movement
+paired with the frozen distribution veto; every other rule is descriptive.
+Planning, initialization, replay, checking, and final aggregation are offline.
+Only the two per-cycle commands can access Nansen:
+
+```bash
+# Offline budget calculation: 1,792 credits maximum, 1,824 authenticated attempts.
+./nansen-lab cohort-plan
+
+# Run only after the implementation is committed and a fresh account preflight
+# can prove the full remaining ceiling. The first time must be HH:05:00 UTC.
+./nansen-lab cohort-init \
+  --experiment-dir research/experiments/PROSPECTIVE_COHORT_ID \
+  --first-cycle-at 2026-08-24T12:05:00Z
+
+# Live, schedule-bound collection and later four-hour settlement.
+./nansen-lab cohort-start-cycle --program research/experiments/PROSPECTIVE_COHORT_ID/program.json --cycle 1
+./nansen-lab cohort-settle-cycle --program research/experiments/PROSPECTIVE_COHORT_ID/program.json --cycle 1
+
+# Offline integrity/progress and terminal-only aggregation.
+./nansen-lab cohort-replay --program research/experiments/PROSPECTIVE_COHORT_ID/program.json
+./nansen-lab cohort-check --program research/experiments/PROSPECTIVE_COHORT_ID/program.json
+./nansen-lab cohort-finalize --program research/experiments/PROSPECTIVE_COHORT_ID/program.json
+```
+
+The maximum assumes two pages on every buyer/seller and DEX surface; typical
+one-page use is 1,152 credits. A cycle cannot reroll a token, retry a request,
+or use a second screener page. The observed DEX VWAP with 100/250-bps costs is
+execution-aware paper evidence, not an executable route. With only 160 total
+opportunities, the cohort may validly finish `insufficient_strategy_fills`;
+counterfactual fills for `ABSTAIN` never count toward the 100 strategy-fill
+advancement gate. A decision seal must precede its first entry boundary and
+land within 45 minutes of the scheduled start, so slow or stale recovery cannot
+turn old features into a backtest.
+
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.
 
 The [`prospective GPT pilot successor`](research/experiments/2026-08-17-gpt-prospective-pilot-successor/REPORT.md) is a separately named terminal schema-v4 observation. The corrected OpenAI key passed the exact `gpt-5.6-sol` model-access preflight, but Nansen's free account response omitted the declared credit-use and remaining-balance headers, so the protocol stopped before selection or inference. Its [result review](docs/audits/2026-08-17-gpt-prospective-pilot-successor-result-review.md) explains why replay conservatively records one ambiguous call/credit even though the received cost header was zero.

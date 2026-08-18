@@ -490,3 +490,29 @@ def test_pilot_parser_has_fixed_budget_and_no_override_flags():
         parser.parse_args([
             "pilot-start", "--manifest", "experiment/manifest.json", "--force",
         ])
+
+
+def test_cohort_plan_is_offline_and_reports_exact_approved_ceiling(monkeypatch, capsys):
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("offline cohort plan accessed credentials or a client")
+
+    monkeypatch.setattr(cli, "load_dotenv", forbidden)
+    monkeypatch.setattr(cli, "NansenClient", forbidden)
+    monkeypatch.setattr(sys, "argv", ["nansen-lab", "cohort-plan"])
+    cli.main()
+    output = capsys.readouterr().out
+    assert '"maximum_program_credits": 1792' in output
+    assert '"maximum_program_authenticated_attempts": 1824' in output
+    assert "No API calls were made." in output
+
+
+def test_cohort_live_parser_exposes_only_fixed_ceiling_arguments():
+    parser = cli.build_parser()
+    args = parser.parse_args([
+        "cohort-start-cycle", "--program", "program.json", "--cycle", "1"
+    ])
+    assert args.max_cycle_credits == 56
+    assert args.max_program_credits == 1792
+    with pytest.raises(ValueError, match="fixed"):
+        args.max_cycle_credits = 55
+        cli._cohort_ceilings(args)

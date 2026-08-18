@@ -107,6 +107,44 @@ completed bundle may be verified offline, but cannot initialize a duplicate:
   --manifest research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/manifest.json
 ```
 
+## Prospective multi-cycle cohort v1
+
+The next profitability test is a new append-only family, not an extension of
+the terminal schema-v4 pilots or historical bundles. It freezes 32 collection
+starts at a 44-hour cadence and selects five disjoint tokens from one complete
+screener universe: early, middle, and momentum accumulation plus neutral and
+distribution controls. Prior selection count rotates exposure; outcomes,
+missingness, decisions, and fill status never influence later panels.
+
+Each selected token receives exact trailing completed Smart-Money and exchange
+flow grids plus complete BUY/SELL wallet pagination. All decisions are sealed
+before a common five-minute-aligned `t0` and no later than 45 minutes after the
+scheduled start. Entry BUY liquidity, four-hour exit SELL liquidity, and an
+inclusive contiguous closed five-minute OHLCV grid are then collected for every
+token regardless of action. This common counterfactual outcome prevents
+abstention-driven outcome missingness.
+
+Each cycle has its own crash-resumable hash-linked 56-credit budget and a
+zero-credit account proof for the full remaining program ceiling. Across 32
+cycles the billable maximum is 1,792 credits; authenticated attempts, including
+account proofs, are capped at 1,824. No automatic retry, repair, replacement
+candidate, second screener page, or reroll is permitted.
+
+The full cohort remains holdout. Aggregation is locked until every cycle is
+terminal and keeps opportunities, signals, counterfactual fills, strategy
+fills, and outcomes distinct. Advancement requires at least 100 filled signals,
+20 tokens, 70% signal fill rate, positive base/median/stress returns, bounded
+token/week concentration, and a positive deterministic token/week block-
+bootstrap lower bound. It is therefore valid—and expected for sparse rules—for
+the approved 160-opportunity program to finish with insufficient strategy
+fills. A larger program changes the budget and requires a new preregistration.
+Only buyer-breadth/exchange co-movement paired with the distribution veto is
+confirmatory and advance-eligible; base H5 and H0-H4 variants remain
+descriptive to avoid an unadjusted multiple-strategy winner.
+
+The exact contract is
+[`2026-08-18-prospective-multi-cycle-cohort-v1.md`](superpowers/specs/2026-08-18-prospective-multi-cycle-cohort-v1.md).
+
 ## Prospective schema-v4 GPT pilot
 
 `2026-08-17-gpt-prospective-pilot` is a one-token, paper-only observation bound by hash to the frozen schema-v3 strategy records, the prospective design, and the pinned Nansen OpenAPI contract extract. Its lifecycle is append-only: `preregistered -> snapshot_collected -> decision_sealed -> entry_observed -> settled`, with `unscorable` as a terminal failure state. Every stage uses a hash-linked seal and an immutable snapshot of the Nansen budget journal; the mutable budget head is only a recoverable cache.
