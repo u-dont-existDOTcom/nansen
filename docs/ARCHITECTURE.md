@@ -99,10 +99,12 @@ alias. New responses retain strict pricing and contract-native chain checks.
 Its seven-attempt/six-credit ceiling is incremental; the seal also reports the
 nine-attempt/eleven-credit source-plus-successor ceiling.
 
+The source recovery is one-off and bound to the terminal experiment ID. Its
+completed bundle may be verified offline, but cannot initialize a duplicate:
+
 ```bash
-./nansen-lab historical-recovery-init --experiment-dir research/experiments/EXPERIMENT_ID
-./nansen-lab historical-recovery-start --manifest research/experiments/EXPERIMENT_ID/manifest.json
-./nansen-lab historical-recovery-check --manifest research/experiments/EXPERIMENT_ID/manifest.json
+./nansen-lab historical-recovery-check \
+  --manifest research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/manifest.json
 ```
 
 ## Prospective schema-v4 GPT pilot

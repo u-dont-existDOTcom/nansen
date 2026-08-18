@@ -112,6 +112,7 @@ def recovery_fixture(tmp_path, monkeypatch):
     project_root = Path(recovery.__file__).resolve().parents[2]
     source_state = recovery._source_state(project_root)
     monkeypatch.setattr(recovery, "_source_state", lambda _: source_state)
+    monkeypatch.setattr(recovery, "EXPERIMENT_ID", "fixture-recovery")
     design = tmp_path / recovery.DESIGN_PATH
     design.parent.mkdir(parents=True)
     design.write_bytes((project_root / recovery.DESIGN_PATH).read_bytes())
@@ -122,6 +123,15 @@ def recovery_fixture(tmp_path, monkeypatch):
         design_path=design,
     )
     return root, manifest, source_state
+
+
+def test_init_rejects_a_second_experiment_identity(tmp_path):
+    with pytest.raises(recovery.HistoricalRecoveryError, match="identity is fixed"):
+        recovery.initialize_historical_recovery(
+            tmp_path / "research" / "experiments" / "duplicate-recovery",
+            created_at=datetime(2026, 8, 18, 14, tzinfo=timezone.utc),
+            design_path=tmp_path / recovery.DESIGN_PATH,
+        )
 
 
 class FakeNansen:

@@ -82,16 +82,17 @@ discovery-only: daily close proxies, liquidity known only at selection, and
 fixed cost sensitivities cannot establish an executable or profitable strategy.
 
 The first bounded discovery sealed `unscorable` after the paid screener omitted
-its quoted-cost header. Its source-bound recovery adopts those exact bytes,
-freezes the audited `bsc`-to-`bnb` normalization and four outcome batches
-offline, and never calls the screener again. The recovery ceiling is seven
+its quoted-cost header. Its one-off source-bound recovery adopted those exact
+bytes, froze the audited `bsc`-to-`bnb` normalization and four outcome batches
+offline, and never called the screener again. The recovery completed at seven
 additional authenticated attempts and six additional credits; including the
-source, the study ceiling is nine attempts and eleven credits:
+source, the study used nine attempts and eleven credits. The exact daily rule
+did not advance because its event-median spread was negative. Both bundles are
+terminal; verify the recovery offline, but do not initialize or start another:
 
 ```bash
-./nansen-lab historical-recovery-init --experiment-dir research/experiments/EXPERIMENT_ID
-./nansen-lab historical-recovery-start --manifest research/experiments/EXPERIMENT_ID/manifest.json
-./nansen-lab historical-recovery-check --manifest research/experiments/EXPERIMENT_ID/manifest.json
+./nansen-lab historical-recovery-check \
+  --manifest research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/manifest.json
 ```
 
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.

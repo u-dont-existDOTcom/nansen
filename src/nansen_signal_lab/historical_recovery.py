@@ -62,6 +62,7 @@ class HistoricalRecoveryError(HistoricalDiscoveryError):
 
 
 DESIGN_VERSION = "holder-breadth-daily-source-recovery-v2"
+EXPERIMENT_ID = "2026-08-18-holder-breadth-historical-recovery-v2"
 DESIGN_PATH = (
     "docs/superpowers/specs/"
     "2026-08-18-historical-holder-breadth-source-recovery-v2.md"
@@ -356,6 +357,8 @@ def initialize_historical_recovery(
 ) -> Path:
     root = Path(root).absolute()
     repo_root = _repo_root_for_experiment(root)
+    if root.name != EXPERIMENT_ID:
+        raise HistoricalRecoveryError("historical recovery experiment identity is fixed")
     if root.exists() and any(root.iterdir()):
         raise HistoricalRecoveryError("historical recovery directory is not empty")
     expected_design = repo_root / DESIGN_PATH
@@ -443,7 +446,11 @@ def load_historical_recovery_manifest(path: Path) -> dict[str, Any]:
     }
     if set(manifest) != expected_keys or canonical_json_bytes(manifest) != raw:
         raise HistoricalRecoveryError("historical recovery manifest shape or encoding is invalid")
-    if manifest["schema_version"] != 1 or manifest["experiment_id"] != root.name:
+    if (
+        manifest["schema_version"] != 1
+        or manifest["experiment_id"] != root.name
+        or manifest["experiment_id"] != EXPERIMENT_ID
+    ):
         raise HistoricalRecoveryError("historical recovery identity differs")
     if manifest["stage"] not in {"preregistered", "completed", "unscorable"}:
         raise HistoricalRecoveryError("historical recovery stage is invalid")
