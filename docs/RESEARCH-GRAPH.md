@@ -101,6 +101,17 @@ flowchart LR
     exp_20260817_paper_strategy_feasibility -->|freezes_same_six_records_for| exp_20260817_gpt_prospective_pilot_successor
     protocol_identity_blinded_gpt -->|tested_by| exp_20260817_gpt_prospective_pilot_successor
     exp_20260817_gpt_prospective_pilot_successor -->|terminated_before_selection| obs_successor_account_headers_missing
+
+    exp_20260818_holder_breadth_historical["Experiment: 2026-08-18 holder-breadth historical discovery v1"]
+    obs_historical_pricing_incomplete["Terminal observation: screener used 5 credits but omitted quoted-cost header"]
+    obs_historical_bsc_alias["Provider mismatch: requested bnb, returned bsc"]
+    next_historical_recovery["Next experiment: source-bound recovery without screener rerun"]
+
+    obs_holder_breadth_advance -->|tests_larger_daily_analogue| exp_20260818_holder_breadth_historical
+    exp_20260818_holder_breadth_historical -->|terminated_before_holdings_and_outcomes| obs_historical_pricing_incomplete
+    exp_20260818_holder_breadth_historical -->|also_blocked_by_literal_chain| obs_historical_bsc_alias
+    obs_historical_pricing_incomplete -->|requires_new_preregistration| next_historical_recovery
+    obs_historical_bsc_alias -->|requires_explicit_alias| next_historical_recovery
 ```
 
 Observation evidence:
@@ -119,5 +130,8 @@ Observation evidence:
 - [`audit_gpt_pilot_invalidated`](audits/2026-08-17-gpt-prospective-pilot-erratum.md) — the terminal event is unusable for model comparison because an invalid credential class should have failed local validation.
 - [`exp_20260817_gpt_prospective_pilot_successor`](../research/experiments/2026-08-17-gpt-prospective-pilot-successor/REPORT.md) — terminal successor; exact model access passed, but incomplete Nansen account pricing headers stopped the run before selection or inference.
 - [`obs_successor_account_headers_missing`](audits/2026-08-17-gpt-prospective-pilot-successor-result-review.md) — reviewed fail-closed outcome; one conservative ambiguous reservation, no confirmed credit deduction or model-quality evidence.
+- [`exp_20260818_holder_breadth_historical`](../research/experiments/2026-08-18-holder-breadth-historical-discovery-v1/REPORT.md) — terminal `unscorable` discovery; the paid screener response lacked its quoted-cost header, so no holdings or OHLCV request ran.
+- [`obs_historical_pricing_incomplete`](audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md) — reviewed provider-evidence failure; five credits used, 70 remaining, no strategy result.
+- [`obs_historical_bsc_alias`](audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md#provider-evidence-and-accounting) — the beta response used `bsc` for the requested `bnb` chain.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

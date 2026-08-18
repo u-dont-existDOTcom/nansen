@@ -75,3 +75,13 @@ This ledger is append-only: add new dated entries at the end; do not rewrite pri
 - **Nansen result:** The free account response returned plan `free`, body balance `90`, and cost header `0`, but omitted the declared use and remaining headers. The protocol stopped before the screener or any token-specific request.
 - **Accounting:** One ambiguous call/credit is reserved conservatively; no provider deduction is confirmed. No selected token, snapshot, GPT output, comparator decision, paper fill, or market outcome exists.
 - **Disposition:** Correct fail-closed outcome, not evidence about model quality. See the [successor result review](audits/2026-08-17-gpt-prospective-pilot-successor-result-review.md). Do not create another automatic retry while the account endpoint omits the required headers.
+
+## 2026-08-18 — Historical holder-breadth discovery terminal pricing failure
+
+- **Bundle:** [`research/experiments/2026-08-18-holder-breadth-historical-discovery-v1/`](../research/experiments/2026-08-18-holder-breadth-historical-discovery-v1/) — immutable terminal discovery bundle; manifest SHA-256 `af8f77f9d0a5a9d5043401e8a676a173326b008ff0802fb6ecdca3efac936b23`.
+- **Question:** Does positive four-day Smart-Money holder breadth improve twelve-day cost-adjusted outcomes over otherwise matched non-positive breadth on a fixed 20-token, eight-week daily cohort?
+- **Terminal event:** The account baseline proved 75 credits. The beta historical screener returned HTTP 200, reported five credits used and 70 remaining, but omitted its quoted-cost header. The fail-closed protocol sealed `unscorable` before holdings or OHLCV collection.
+- **Accounting:** Two authenticated attempts, one paid call, five credits used, no retry. The screener returned 153 final-page rows. It also returned BNB rows as `bsc` after a request for `bnb`, so the frozen literal-chain validator would reject the body independently of pricing.
+- **Interpretation:** No cohort, strategy event, return, arm comparison, or advancement decision exists. This is provider-evidence failure, not evidence against holder breadth or any community profitability claim.
+- **Reviewed result:** [`docs/audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md`](audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md).
+- **Follow-up:** Open — a separately preregistered successor may reuse the exact paid screener bytes without rerunning them, provided it binds the terminal source, preregisters the `bsc -> bnb` alias and a narrow observed-cost derivation, and leaves every strategy rule and gate unchanged.
