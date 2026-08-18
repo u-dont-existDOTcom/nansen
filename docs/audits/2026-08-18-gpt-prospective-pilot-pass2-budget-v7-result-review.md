@@ -135,7 +135,10 @@ entry, settlement, score, order, wallet, gas, or venue action occurred.
   with no substantive finding. Its transient stale-handoff finding was resolved
   and rechecked before closeout.
 - The full repository suite passed: 499 tests in 44.86 seconds.
-- `python -m compileall -q src tests` and `git diff --check` passed.
+- `python -m compileall -q src tests` passed. The staged whitespace check passed
+  for every non-sealed file. `MODEL-RESULT.md` retains seven generator-produced
+  Markdown hard breaks because editing that file would invalidate the terminal
+  manifest and decision seal.
 
 ## Completion
 
