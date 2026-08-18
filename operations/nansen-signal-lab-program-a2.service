@@ -1,0 +1,32 @@
+[Unit]
+Description=Run frozen Nansen historical theory discovery Program A2
+Wants=network-online.target time-sync.target
+After=network-online.target time-sync.target
+After=nansen-signal-lab-cohort.service
+Conflicts=nansen-signal-lab-cohort.timer
+Before=nansen-signal-lab-cohort.timer
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab
+EnvironmentFile=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/.env
+ExecStartPre=/bin/sh -eu -c 'deadline=$$(/usr/bin/date -u -d 2026-08-20T10:43:30Z +%%s); while :; do now=$$(/usr/bin/date -u +%%s); [ "$$now" -lt "$$deadline" ] || exit 2; load=$$(/usr/bin/systemctl --user show --property=LoadState --value nansen-signal-lab-cohort.service) || exit 2; state=$$(/usr/bin/systemctl --user show --property=ActiveState --value nansen-signal-lab-cohort.service) || exit 2; [ "$$load" = loaded ] || exit 2; case "$$state" in inactive) exit 0 ;; active|activating|deactivating|reloading) /usr/bin/sleep 1 ;; *) exit 2 ;; esac; done'
+ExecStart=/bin/sh -eu -c 'deadline=$$(/usr/bin/date -u -d 2026-08-20T10:43:30Z +%%s); now=$$(/usr/bin/date -u +%%s); remaining=$$((deadline - now)); [ "$$remaining" -gt 0 ] || exit 2; exec /usr/bin/timeout --foreground --signal=TERM --kill-after=5s "$${remaining}s" /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/.venv/bin/python /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/scripts/nansen_theory_portfolio_a2.py run-a2 --manifest /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-18-historical-theory-discovery-a2-v1/program.json'
+ExecStopPost=/usr/bin/systemctl --user --no-block start nansen-signal-lab-cohort.timer
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+TimeoutStartSec=2d
+TimeoutStopSec=10s
+Restart=no
+NoNewPrivileges=true
+PrivateUsers=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+RuntimeDirectory=nansen-signal-lab-provider
+RuntimeDirectoryPreserve=yes
+RuntimeDirectoryMode=0700
+ReadWritePaths=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-18-historical-theory-discovery-a2-v1
+ReadWritePaths=%t/nansen-signal-lab-provider
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

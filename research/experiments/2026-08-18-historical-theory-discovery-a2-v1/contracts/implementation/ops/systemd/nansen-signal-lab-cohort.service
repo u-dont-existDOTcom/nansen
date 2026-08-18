@@ -1,0 +1,29 @@
+[Unit]
+Description=Advance the frozen Nansen prospective cohort when an action is due
+Wants=network-online.target
+After=network-online.target
+Wants=time-sync.target
+After=time-sync.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab
+ExecStart=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/.venv/bin/python /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/scripts/prospective_cohort_timer.py --program /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-18-prospective-multi-cycle-cohort-v1/program.json
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+TimeoutStartSec=infinity
+NoNewPrivileges=true
+PrivateUsers=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+RuntimeDirectory=nansen-signal-lab-cohort nansen-signal-lab-provider
+RuntimeDirectoryMode=0700
+ReadWritePaths=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-18-prospective-multi-cycle-cohort-v1
+ReadWritePaths=%t/nansen-signal-lab-cohort
+ReadWritePaths=%t/nansen-signal-lab-provider
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target
