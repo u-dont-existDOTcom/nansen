@@ -116,7 +116,7 @@ Only the two per-cycle commands can access Nansen:
   --experiment-dir research/experiments/PROSPECTIVE_COHORT_ID \
   --first-cycle-at 2026-08-24T12:05:00Z
 
-# Live, schedule-bound collection and later four-hour settlement.
+# Live, schedule-bound collection and settlement at the exact sealed boundary.
 ./nansen-lab cohort-start-cycle --program research/experiments/PROSPECTIVE_COHORT_ID/program.json --cycle 1
 ./nansen-lab cohort-settle-cycle --program research/experiments/PROSPECTIVE_COHORT_ID/program.json --cycle 1
 
@@ -141,6 +141,41 @@ copies plus hashes of the protocol runtime, and exact Python/dependency
 versions. Every live command and offline replay refuses environment drift, so
 selection, decisions, execution scoring, and aggregation cannot change
 outcome-adaptively during the eight-week holdout.
+
+The active cohort is advanced by the external
+`scripts/prospective_cohort_timer.py` supervisor and the versioned user units in
+`ops/systemd/`. The timer wakes every minute but makes no call before an action
+is due. It requires an NTP-synchronized clock, waits for NetworkManager before
+live work, uses the absolute manifest path, resumes crash-safe stages, and reads
+the exact settlement boundary from the sealed decision artifact. It never
+rerolls or edits the frozen implementation. Install and enable the versioned
+units with:
+
+```bash
+install -Dm0644 \
+  /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/ops/systemd/nansen-signal-lab-cohort.service \
+  /home/joel/.config/systemd/user/nansen-signal-lab-cohort.service
+install -Dm0644 \
+  /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/ops/systemd/nansen-signal-lab-cohort.timer \
+  /home/joel/.config/systemd/user/nansen-signal-lab-cohort.timer
+systemctl --user daemon-reload
+systemctl --user enable --now nansen-signal-lab-cohort.timer
+loginctl enable-linger "$USER"
+```
+
+Verify the installed unit, next poll, linger state, and service log with:
+
+```bash
+systemctl --user status nansen-signal-lab-cohort.timer
+systemctl --user list-timers nansen-signal-lab-cohort.timer
+loginctl show-user "$USER" -p Linger
+journalctl --user -u nansen-signal-lab-cohort.service
+```
+
+The machine must remain powered and awake around collection windows. User
+lingering keeps the timer active after logout and starts the user manager during
+boot; `Persistent=true` catches the next poll after downtime but cannot recreate
+market observations that were missed while the machine was off.
 
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.
 
