@@ -106,12 +106,20 @@ flowchart LR
     obs_historical_pricing_incomplete["Terminal observation: screener used 5 credits but omitted quoted-cost header"]
     obs_historical_bsc_alias["Provider mismatch: requested bnb, returned bsc"]
     next_historical_recovery["Next experiment: source-bound recovery without screener rerun"]
+    exp_20260818_holder_breadth_recovery["Experiment: source-bound holder-breadth recovery v2"]
+    obs_holder_breadth_mean_median_conflict["Observation: positive token mean, negative typical-event spread"]
+    decision_holder_breadth_daily_stop["Decision: exact daily holder-breadth analogue does not advance"]
+    next_prospective_cohort["Next evidence: multi-cycle prospective cohort"]
 
     obs_holder_breadth_advance -->|tests_larger_daily_analogue| exp_20260818_holder_breadth_historical
     exp_20260818_holder_breadth_historical -->|terminated_before_holdings_and_outcomes| obs_historical_pricing_incomplete
     exp_20260818_holder_breadth_historical -->|also_blocked_by_literal_chain| obs_historical_bsc_alias
     obs_historical_pricing_incomplete -->|requires_new_preregistration| next_historical_recovery
     obs_historical_bsc_alias -->|requires_explicit_alias| next_historical_recovery
+    next_historical_recovery -->|implemented_as| exp_20260818_holder_breadth_recovery
+    exp_20260818_holder_breadth_recovery -->|produced| obs_holder_breadth_mean_median_conflict
+    obs_holder_breadth_mean_median_conflict -->|failed_frozen_median_gate| decision_holder_breadth_daily_stop
+    decision_holder_breadth_daily_stop -->|requires_new_untouched_evidence| next_prospective_cohort
 ```
 
 Observation evidence:
@@ -133,5 +141,8 @@ Observation evidence:
 - [`exp_20260818_holder_breadth_historical`](../research/experiments/2026-08-18-holder-breadth-historical-discovery-v1/REPORT.md) — terminal `unscorable` discovery; the paid screener response lacked its quoted-cost header, so no holdings or OHLCV request ran.
 - [`obs_historical_pricing_incomplete`](audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md) — reviewed provider-evidence failure; five credits used, 70 remaining, no strategy result.
 - [`obs_historical_bsc_alias`](audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md#provider-evidence-and-accounting) — the beta response used `bsc` for the requested `bnb` chain.
+- [`exp_20260818_holder_breadth_recovery`](../research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/REPORT.md) — completed source-bound recovery; 41 scored events at complete coverage and no screener rerun.
+- [`obs_holder_breadth_mean_median_conflict`](audits/2026-08-18-holder-breadth-historical-recovery-v2-result-review.md) — token-equal and block aggregates favored positive breadth, but its typical event was negative and worse than the reference.
+- [`decision_holder_breadth_daily_stop`](audits/2026-08-18-holder-breadth-historical-recovery-v2-result-review.md#disposition) — the exact frozen daily analogue does not advance and must not be tuned on the observed cohort.
 
 [Powered by Nansen API](https://nansen.ai/). Public evidence follows Nansen's [redistribution guidance](https://docs.nansen.ai/guides/redistribution-guide).

@@ -85,3 +85,14 @@ This ledger is append-only: add new dated entries at the end; do not rewrite pri
 - **Interpretation:** No cohort, strategy event, return, arm comparison, or advancement decision exists. This is provider-evidence failure, not evidence against holder breadth or any community profitability claim.
 - **Reviewed result:** [`docs/audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md`](audits/2026-08-18-holder-breadth-historical-discovery-v1-result-review.md).
 - **Follow-up:** Open — a separately preregistered successor may reuse the exact paid screener bytes without rerunning them, provided it binds the terminal source, preregisters the `bsc -> bnb` alias and a narrow observed-cost derivation, and leaves every strategy rule and gate unchanged.
+
+## 2026-08-18 — Historical holder-breadth source recovery completed
+
+- **Bundle:** [`research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/`](../research/experiments/2026-08-18-holder-breadth-historical-recovery-v2/) — immutable terminal recovery; manifest SHA-256 `9b478afb4bbf1baec1b894526aaf52b37a77193016996b1811d35df67d1a64ef`.
+- **Recovery:** Reused the exact outcome-unseen paid screener bytes, froze raw and normalized provenance plus the 20-token cohort and four OHLCV payloads, and made no screener request. The source-only `bsc -> bnb` alias and observed five-credit source derivation were explicit preregistered recovery changes.
+- **Accounting:** Seven successor attempt-1 requests, six additional credits, no retry, current proved balance 64. Source plus successor used nine authenticated attempts and eleven credits.
+- **Result:** Positive holder breadth had 26 events/16 tokens and non-positive breadth had 15 events/13 tokens, both at 100% outcome coverage. Token-equal base spread was `+21.9805` points and three of four block spreads were positive, but event-median spread was `-2.9096` points (`-6.1055%` versus `-3.1959%`).
+- **Decision:** `does_not_advance`. The exact daily analogue failed only its frozen event-median gate. A post-result concentration diagnostic found its `+8.7630%` positive-arm token-equal mean falls to `-5.0093%` after removing the single highest token; this diagnostic explains the gate but does not change it.
+- **Interpretation:** This is a valid negative result for the exact frozen analogue, not a general falsification of holder breadth or community profitability claims. Do not rerun or tune on this cohort.
+- **Reviewed result:** [`docs/audits/2026-08-18-holder-breadth-historical-recovery-v2-result-review.md`](audits/2026-08-18-holder-breadth-historical-recovery-v2-result-review.md).
+- **Follow-up:** A profitability-capable next step requires a multi-cycle prospective cohort with unbiased counterfactual outcomes, buyer/seller breadth, labelled exchange flow, point-in-time execution evidence, costs, and block statistics. The remaining 64 credits can fund one plumbing cycle, not the required evidence program.
