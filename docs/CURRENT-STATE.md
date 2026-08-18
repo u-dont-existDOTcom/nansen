@@ -10,7 +10,9 @@ approximately 1,800-credit evidence budget.
 
 ## Verified baseline
 
-- Main branch result head: `c91609b` plus terminal replay guard `cbd165c`.
+- Main branch head: offline cohort implementation `22f5d2a` plus reviewed
+  hardening checkpoint `a6367fb`.
+- Historical result baseline: `c91609b` plus terminal replay guard `cbd165c`.
 - Historical holder-breadth recovery v2 is immutable `completed` and
   `does_not_advance`; do not rerun or tune it.
 - Terminal manifest:
@@ -20,6 +22,10 @@ approximately 1,800-credit evidence budget.
   a heavy-tail winner while the frozen event-median spread was negative.
 - Result review:
   `docs/audits/2026-08-18-holder-breadth-historical-recovery-v2-result-review.md`.
+- Prospective implementation review:
+  `docs/audits/2026-08-18-prospective-multi-cycle-cohort-v1-review.md`.
+- The pre-existing untracked `handoff.md` is not part of either checkpoint and
+  remains untouched.
 
 ## Completed offline implementation
 
@@ -35,9 +41,16 @@ The append-only multi-cycle prospective cohort family now:
 - keep opportunity count, strategy-signal count, fill count, and outcome count
   distinct;
 - enforce the existing eight-week, 100-fill, 20-token, 70%-fill, stress,
-  concentration, and token/week bootstrap gates without weakening them.
+  concentration, and token/week bootstrap gates without weakening them;
 - treat buyer-breadth/exchange co-movement paired with the distribution veto as
-  the sole confirmatory rule; all other frozen variants are descriptive.
+  the sole confirmatory rule; all other frozen variants are descriptive;
+- archive and validate exact protocol source, dependency versions, and
+  self-contained comparator definitions before every live command and replay;
+- recover provably untransmitted reservations without inventing request
+  attempts, preserve partial-entry exit evidence, and retain sealed opportunity
+  and decision counts when a later outcome stage becomes unscorable;
+- enforce the pinned provider's signed-flow semantics, exact response bounds,
+  page ceilings, pagination types, and frozen terminal reason codes.
 
 ## Budget boundary
 
@@ -54,7 +67,11 @@ new owner approval before preregistration.
 
 ## Verification
 
-- Full offline suite: 616 passed.
+- Full offline suite: 635 passed in 95.01 seconds.
+- Complete cohort lifecycle suite: 26 passed.
+- `compileall` and `git diff --check`: passed.
+- Exact cohort design SHA-256:
+  `891fb3ba5307723f79d0413fc8d45957b1d11f966e5f920fa40ee732de7a230a`.
 - Exact contract SHA-256:
   `d01160d54c375f022d839d4c0619b51928bfcc652a5308fdd8c927a1e53e7548`.
 - Frozen strategy SHA-256:
@@ -63,7 +80,10 @@ new owner approval before preregistration.
 
 ## Next safe action
 
-Commit the reviewed offline implementation. Do not initialize a live cohort,
-query the provider, spend credits, push, or publish until a fresh account
-preflight can prove all 1,792 remaining program credits. The last proved
-balance is only 64 credits, so funding is the current external blocker.
+Funding is the current external blocker. The last proved balance is only 64
+credits, so do not schedule or initialize the live cohort yet. Once the account
+is funded for the full 1,792-credit ceiling, choose a future `HH:05` UTC start,
+initialize the frozen cohort offline, and let cycle one's zero-credit account
+preflight prove the entire remaining program ceiling before its first billable
+request. No live cohort has been initialized, and no provider query, credit
+spend, push, or publication is authorized by this checkpoint.
