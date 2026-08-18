@@ -6,18 +6,21 @@ Updated: 2026-08-18
 
 Find a strategy that survives prospective, execution-aware profitability gates.
 The owner approved proceeding with the recommended Nansen cohort and an
-approximately 1,800-credit evidence budget.
+approximately 1,800-credit evidence budget. The funded 32-cycle holdout is now
+active.
 
 ## Verified baseline
 
-- Main branch head: offline cohort implementation `22f5d2a` plus reviewed
-  hardening checkpoint `a6367fb`.
+- Offline cohort implementation: `22f5d2a` plus reviewed hardening checkpoint
+  `a6367fb` and recovery checkpoint `ca714e3`.
+- Frozen live preregistration: `248dd16`; cycle-one evidence: `dda2a9c`.
 - Historical result baseline: `c91609b` plus terminal replay guard `cbd165c`.
 - Historical holder-breadth recovery v2 is immutable `completed` and
   `does_not_advance`; do not rerun or tune it.
 - Terminal manifest:
   `9b478afb4bbf1baec1b894526aaf52b37a77193016996b1811d35df67d1a64ef`.
-- Current proved Nansen balance after the terminal recovery: 64 credits.
+- Cycle one's account preflight proved 50,064 credits before billable work;
+  the provider reported 50,063 after its one-credit screener.
 - Exact holder-breadth finding: positive token-equal aggregates were driven by
   a heavy-tail winner while the frozen event-median spread was negative.
 - Result review:
@@ -26,6 +29,22 @@ approximately 1,800-credit evidence budget.
   `docs/audits/2026-08-18-prospective-multi-cycle-cohort-v1-review.md`.
 - The pre-existing untracked `handoff.md` is not part of either checkpoint and
   remains untouched.
+
+## Active cohort
+
+- Program:
+  `research/experiments/2026-08-18-prospective-multi-cycle-cohort-v1/program.json`.
+- Cycle one was scheduled for `2026-08-18T15:05:00Z` and terminalized
+  `unscorable` with the frozen reason `insufficient_strata`. No reroll or
+  settlement is allowed or required.
+- Verified cumulative use: 2 authenticated attempts, 1 billable credit, and no
+  ceiling breach. The full funding gate passed before the screener.
+- Cycle two is scheduled for `2026-08-20T11:05:00Z`.
+- Operational constraint: invoke every cohort command with the absolute program
+  path. The frozen CLI accepts a relative path, but once a cycle exists its
+  offline tree verifier can loop while comparing absolute descendants to a
+  relative root. Absolute-path replay/check passed. Do not patch the frozen
+  implementation during the holdout.
 
 ## Completed offline implementation
 
@@ -76,14 +95,21 @@ new owner approval before preregistration.
   `d01160d54c375f022d839d4c0619b51928bfcc652a5308fdd8c927a1e53e7548`.
 - Frozen strategy SHA-256:
   `5d5859be0c03bd1f786436ad199aac48de9c6688883392836796c0f8e3ccf6d5`.
-- No live Nansen or OpenAI call was made while building or verifying it.
+- Offline implementation verification made no live calls; active cohort usage
+  is recorded separately above.
 
 ## Next safe action
 
-Funding is the current external blocker. The last proved balance is only 64
-credits, so do not schedule or initialize the live cohort yet. Once the account
-is funded for the full 1,792-credit ceiling, choose a future `HH:05` UTC start,
-initialize the frozen cohort offline, and let cycle one's zero-credit account
-preflight prove the entire remaining program ceiling before its first billable
-request. No live cohort has been initialized, and no provider query, credit
-spend, push, or publication is authorized by this checkpoint.
+At `2026-08-20T11:05:00Z`, start cycle two with the absolute manifest path:
+
+```bash
+./nansen-lab cohort-start-cycle \
+  --program /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-18-prospective-multi-cycle-cohort-v1/program.json \
+  --cycle 2
+```
+
+Do not invoke it early; the allowed start window ends at `11:20:00Z`. If it
+seals decisions, settle no earlier than `2026-08-20T15:05:00Z`, again using the
+absolute path. If it terminalizes unscorable, verify and commit the evidence and
+advance to the next fixed cycle without rerolling. Do not tune the protocol,
+edit its runtime, push, or publish during the holdout.
