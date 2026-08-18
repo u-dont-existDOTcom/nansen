@@ -871,13 +871,15 @@ def _refuse_prior_provider_failure(
         )
         metadata = _load_json(metadata_path)
         status = metadata.get("status_code")
+        parse_status = metadata.get("body_parse_status")
         if (
             not isinstance(status, int)
             or isinstance(status, bool)
             or not 200 <= status < 300
+            or parse_status != "json_object"
         ):
             raise ProgramFatal(
-                f"prior non-success HTTP response for {entry.logical_request_id} "
+                f"prior failed provider response for {entry.logical_request_id} "
                 "forbids resume"
             )
 

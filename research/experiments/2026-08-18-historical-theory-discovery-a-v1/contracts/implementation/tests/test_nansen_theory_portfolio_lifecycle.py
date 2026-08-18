@@ -203,14 +203,21 @@ class ExactPricingClient:
         if self.failure_mode == "pricing" and endpoint == SCREENER_ENDPOINT:
             used = cost + 1
         self.remaining -= used
-        if self.failure_mode == "charged_http" and endpoint == SCREENER_ENDPOINT:
+        if (
+            self.failure_mode in {"charged_http", "charged_nonobject"}
+            and endpoint == SCREENER_ENDPOINT
+        ):
+            nonobject = self.failure_mode == "charged_nonobject"
             response = self._response(
-                {"error": "synthetic charged provider failure"},
+                ["synthetic charged provider failure"]
+                if nonobject
+                else {"error": "synthetic charged provider failure"},
                 cost=cost,
                 used=used,
                 remaining=self.remaining,
                 caller_request_id=caller_request_id,
-                status_code=500,
+                status_code=200 if nonobject else 500,
+                body_parse_status="json_other" if nonobject else "json_object",
             )
             raise NansenRequestFailure(
                 "synthetic charged provider failure",
@@ -362,13 +369,14 @@ class ExactPricingClient:
 
     @staticmethod
     def _response(
-        body: dict[str, Any],
+        body: Any,
         *,
         cost: int | None,
         used: int | None,
         remaining: int | None,
         caller_request_id: str,
         status_code: int = 200,
+        body_parse_status: str = "json_object",
     ) -> NansenEvidenceResponse:
         headers = {}
         for name, value in (
@@ -381,7 +389,7 @@ class ExactPricingClient:
         raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
         return NansenEvidenceResponse(
             body=body,
-            body_parse_status="json_object",
+            body_parse_status=body_parse_status,
             raw_body=raw,
             status_code=status_code,
             request_started_at="2026-08-18T18:00:00Z",
@@ -654,8 +662,11 @@ def test_openapi_drift_crash_can_never_resume_into_authenticated_work(
     assert check_program_a(manifest_path)["stage"] == "unscorable"
 
 
-def test_charged_http_commit_then_crash_can_never_resume_authenticated_work(
-    prepared_program: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("failure_mode", ["charged_http", "charged_nonobject"])
+def test_charged_provider_failure_commit_then_crash_can_never_resume_authenticated_work(
+    prepared_program: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    failure_mode: str,
 ) -> None:
     manifest_path, program_root = prepared_program
     original_fail = HistoricalPricingGuard.fail
@@ -665,7 +676,7 @@ def test_charged_http_commit_then_crash_can_never_resume_authenticated_work(
         raise KeyboardInterrupt("synthetic kill after charged HTTP ledger commit")
 
     monkeypatch.setattr(HistoricalPricingGuard, "fail", crash_after_failure_commit)
-    failed = _exact_client(program_root, failure_mode="charged_http")
+    failed = _exact_client(program_root, failure_mode=failure_mode)
     with pytest.raises(KeyboardInterrupt, match="charged HTTP ledger commit"):
         _run_anchor(program_root, 0, failed)
     assert [request[1] for request in failed.requests] == [
@@ -675,7 +686,7 @@ def test_charged_http_commit_then_crash_can_never_resume_authenticated_work(
     monkeypatch.setattr(HistoricalPricingGuard, "fail", original_fail)
 
     resumed = _exact_client(program_root, remaining=failed.remaining)
-    with pytest.raises(PortfolioError, match="non-success HTTP response") as caught:
+    with pytest.raises(PortfolioError, match="failed provider response") as caught:
         _run_anchor(program_root, 0, resumed)
     assert resumed.fetch_calls == 0
     assert resumed.requests == []

@@ -337,9 +337,10 @@ the ranking and calibration descriptively but terminalizes as
 reported as completed discovery. Any contract drift, account failure, pricing
 or balance discontinuity, ambiguous transmission, or request-ledger ceiling
 failure instead creates a program-fatal unscorable seal immediately. It never
-continues to the next anchor. Any archived non-2xx provider response is likewise
-a permanent program-global failure, including after a crash that occurred just
-after its charged response was committed to the request ledger.
+continues to the next anchor. Any archived non-2xx provider response, or any
+response whose parsed body is not a JSON object, is likewise a permanent
+program-global failure, including after a crash that occurred just after its
+charged response was committed to the request ledger.
 
 ## Program B: prospective discovery and validation
 
