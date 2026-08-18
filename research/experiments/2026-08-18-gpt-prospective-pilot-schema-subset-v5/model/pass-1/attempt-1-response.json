@@ -1,0 +1,189 @@
+{
+  "id": "resp_012b68453e09dbc0016a83bc6a71fc81a2b1c37870b7488ba3",
+  "object": "response",
+  "created_at": 1787018346,
+  "status": "completed",
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1787018362,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": "You are an independent prospective market analyst. Analyze only the supplied identity-blinded, point-in-time snapshot. Choose LONG or ABSTAIN for a fixed four-hour paper objective. Cite only field paths that exist in the supplied snapshot. Do not infer token identity, use tools, request outside data, or discuss future outcomes. Return only the required structured object.",
+  "max_output_tokens": 4000,
+  "max_tool_calls": null,
+  "model": "gpt-5.6-sol",
+  "moderation": null,
+  "output": [
+    {
+      "id": "rs_012b68453e09dbc0016a83bc6b81e881a2b2014a8aaf5b44e8",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqg7x69s0HKHPyC9JGbGmzzunDOteRrPkiT9dMiSx1f5_suhugLpWUgYZvFck964NgcbyMxXzAUC126vizmWSr66GMPEJEgZu-f81lTLIeGlFPymTfcWbfZFihUE7KlCZhUem4a8pACrLT4CJ5IcoG0OQU9VghzXotAAJ2Vwc4gI76-fYdEw7t84LxZ5TqKkg1DTZ-xdd6gHWspnavm3_0hBVRSsg4QWrwvOzxQQHN4D9DzUw_AHTrqq9CmtZRze8OSWdemhqfGWNQsTh2j8Fp3DLq5B-xkUYhVukBX9bLTYZfl5_6UoY22aF5YY5dYpqiaREpNQ4wWCXyQtpl1LqywKbud6mubKnPNxG-KbLal-jSqKqzQpkrVK7URZ8MZkCiaMI3TwnWNIh6gORykEtppckEEOHMvSkEiK9HyAIBfZWoUF-3vp-kToOMc02pnE5t3N6dX2RMZdY_3fFYW-BLh67hIMT5kCNgUpRTCRXcQ2DWBATM1huOQ1LRiCmin8bKhuWNjUX4oIx1yuqQqSVUcKf0XfQuipR6b5PCFaxQe49fTwVDpn9utw798B5Tga3syjcR7cNMgd8iblo13nHoHuCtDKRzhHjAZTjoaLY5VnKtdvj3RPqzMbrYKi4AV_cHwuehjycmsViYDJajj0842gmA-e3dUeU7rmtrNtH8SsoIm3i2PU197eEQcBwtUkne42MjMxWDOdgC7MowgmCHKMvfwP9sSdDQ_UYx19jcAtJiEVvj9BSHr9_8ojpsnPrEfsIL1hIS_pPxM1C5mAYZiBshAwTSiXfZOCRQVq1RDbKjmONViEflaPuiWTUsKoKwkrXM-Ddc_0B7jKFGg7Vq-yyw9ZcvMjQztipgH8Zcl4Z91A7EsMkhnHPzJ8i4XnvZxafRTLfyvKxqA9slMPzqyz141-xBHCjXuPu_ljvpSBkiGFF678qTMyKEGdqM4qtUxtznWTSthgL4tXmox35L2BEeSlyoHTc08Ou-DVKlckwCc4ONwdLcHQ6M_XXTI2kwyWyZO_SaG_n0x3IdG3SyHU2Uh3DnPT-GYTJbYsLran7MXPAQ1vq1wGqxoLCOgeiqM8RNYNm_DRWYLX7QoT1VTbs9YhK8UMTP3hO-CXCBFceyN9FESeXAsufY0mjxg6FtZteT_JyUdWYW_i8mLVaa29Hbqfw5JMDKjnH9eJvVCGOPIpTLumBNuzUc6GXsEur9CB8-nSurLd892HRWycDVH9NlYfuac6FVsr4-FnMx7HKvLyWqSBpdYI9Un-YF_CxycYPIe-ZDY0qvK7MwPUtmkrVgeZMQaXlZX_rd-ZcjjTZ6FqsgYLDQkVEnmChwrT8dvjD4XrIZqrtB13LUIRYB8svHZ14HMvMjI0gGA1qPtD3fpk6UnYuTDI4rM5uDz3Tai1ME-POO5j8s9YSbahH7y_hf45EIEkNeTHaJizDhQTpMwBeKa5M6T0hIAhmafnzXhevBXuXjn56k7lYUDRFLf8EylWT8FiMAzc_Kvw0uG99E0lgoJjSecZDq4dIvclhEfipffU627oRMeA6bwkP-4vpFBXeeiJhhlz_-KLYTH1ASghlsU3b6czL_blvPcuX3vcsU76e-MeUfGeo2NI2ftx30shtZoEQ-npMckHq9vFBcHncjZKit2gD3J08pE-8D7zGclIXpyGO2UqZPGOdqbhMQrDy65waAWwzj80RAYU26VXcK1uHbwvqvIbiCh6AueI0gBX3u12PMcLVmpqYEwaopG9-zmhRW7qHURmusybQ9BKXUax-9xBFEKPIgSR0SMSG_YzLEOl2Z5LqzQh7we19TubuDSbvea-1-AstbSpX64EEsbjygttfDhiKoFdpQkvnpIIo1zv9mZgk4N2xvvbsBHr464pB25EainZ8xpgF61PsFw52lL3lhe9CvvhCvDcNWgcTkmcKGf_T7s7qe8vdUpv5Kvb416qSu1Od1I04PVldYg0XsrMJxK7phWgxZrY535X-MCZxrv9IG0y2MukoQ7be55VQV62nQAKdORsxKM7ho1f3AgJVvTG1T1vCxo6T446oVVZ8cTDZoz8FMN3Bsn2GjIIAX2ae7UewV7J6FVbPo8rvfqxybYhQSv45J3qQb5Unw4YKT8xSo3lZefBSb7HJTcOx-r5DSxSofNgbX6dD0yqj6R5mRphnD3UrQmVmp5ixEJ5zQANS0hnGZGnwXgT-Z2DgZYjg9qjIkqZMKSz0v62f2bsJZ4l7Drrn9vncmphA5DoJIoRLpwZ-R44DMRK8N3L8sF5xhhJplX0oc8lTWsnklnossevFx_4xqZbNtD_6fOKQRajt_eUuRrbVqxpCtlsIlNgeSM0vAYZbLyfGg6vpITjpa63JJ5s6HaVP_zKKXVl9mYn28FvlymHNc4lCeKP4WFrATR10NuoqplDqTZgNlep7RXIIzT3StYIgZ2SEKFjJxizkY9t6vJFrLe0JuQo4Ygj4PJb9JkOTM6g4rsVauvSLmAfgaYJmBktFVbxK12wA_j-0T7ADFUBW2R95vulSv53NzZ-1C5eHYO3TN0p9Pmv6Mi7Phqy77HqfKvM7AB6YzJ6j_Iars1B9P36Md_1caaDmPW9jSCY_A5pxuFFPQEBFW2p1JtOxz3oMPjAZUsjsOrtkTUlw6dg9UfJlJqvWkF8omJKP0bBEf6o6KmwWFFQZCprYN0CUrSh42Z6j3f-eOB6aE1PxCu6hg6B8utQ8qv6B7ZE96f-FIcyH9oUkufhOFBhVm7hYKvl5j42UKqPIqngKE7tN9LNRpTIQymNJ8KWPBVQnghDcVyj8AfK5gl13mAwiDe66HF7zVYADnzy5njULK1h5cfm-adRdm200JusgrjRbsflDLxhP5lYrgTj2NRul3Rhh5qAmo9gcf9wWo80X4t_11uYJResbUr8lPQjSHOVhAT4mXvSo9Qs8W8x3LAnxkNRN8AaSvt16zJGyP407W0hs58mxL2wV0_uOb_YawyoGthaFlAaix7NwQFa-eWPdpaRVAk6yHxv12Dj8SMxq5jSXBZZJ21O2dmkNDbh9YpTJ-7VMc_WKcNGC3CrhVuP6nl27-vo52jfBFbfhHqxNih8whqqX6gzCIldG2MdDKKxDU5f0Ty4DfA20HE-5kbTZygElk1HL_1QePiS4gsPurVSBo2vwgfzSafsrWv2_l85aP34isg8_u9azW4obOXXeATgvUG866JsFpptHempe4lkLRtCdy0cTY4ZpBUhj2XANCpyhIS3fhnF0Sbrz4KCfMEvcm5WHikTA5tQOuGK4OE5ejUPToW-BmcgiX17e4rTjqBX57_eHdWftfApHoKoJ_PEs6GM47QVjEGYcXrqHdPipIWY-V7TuSWDp8aeOHAn0aj266Xkke1yTOHD5ceRj_B4CcZY3L0oenHlu1VgaJsZrA3lWMKPfKL5H1N3_tuBK0U-u3ybk-rKibkbE3cXASDO7b0y5Va34HOAjLVeKyfHx275555xOEMUqZFzAhpSbtbQ2ix0yTYEWkzcmsXYxyX3ehKSUcZqaIgagzjxKcLiWbMw6A5FIid_gUyzKcZck3Ncp90GXcjwEC2AtjkJU61BPBN2p01G6J-K7cdcSLBWZrWzRL7xNiUTGGzPQ5Hy3MEA-0d8GueAbLbPf9nZ9mNP1CSJKfBnA709O59KUUTvU1jD6jKUByrhQocR1NI6T1IVspcaRct37TYHsmiC0SnUcvVfReCPGuBuxG-HGToaLZeaiML8hhOBszxBoq9fkmPUc4BAS3U8IQz8uX3fcsQrnuz3vm7YAdb3HuCosKCs_7bcVjgSWVUr_zHUjEzDGPDuCPwWenH8lNF_bCDFga5WAJwh3-RzWEi4Gori1Ypo6AwyGmNQKLHUY5yJHXb_YxtFZAK-YpCz-foERtc6P-r2YVIfxZ699nMArsEGMZwJJOKdM8QmO-1YGM_QchJnFFIvocD7FR_qdcfDAtqKCe3Prc90KahxXKaeVAYjfplgHXEqyeTxNUEfPRtk-qNjq3KmIqOa7-aa0N33-1lLyVFdCijIAefq_4P1MF9T-LclKzjeGSMmmgocrbPc1Yja94NfdOQt7E4QQl5DyZmScqW6GzzPfJDmGwwLE-6G0NunYKbsiQaoTrteV7LZtdqJK-iiTvqR2HImYP26dNNhWL4nJuv3If744Uvfz_vK0ucuxtTfgiPmaZ1qYVaXHunhDP3Ve-jD48mOlf4BEOzWhxWctAhI9Mi_5JUZhueJIk1ylGAzpv99LA24MCKlGKrHSKRnJsOK1uSf-6mleGYbZeDQKzc7eOlTY5qAXRegA8lE8DREK35Dmn6YAkjlLrFh516m9aFztKOe20BYWy2zXwsuzoCmdPdVheQfUxGWBRyzv06ce2x_pAoakOx5XcKtfiWNC-oTBpAeUA_yyDmZZonsXs8O3O",
+      "summary": []
+    },
+    {
+      "id": "msg_012b68453e09dbc0016a83bc738fdc81a2b22f1c565b88d3f9",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "{\"action\":\"ABSTAIN\",\"confidence\":0.79,\"evidence_against\":[\"snapshot.smart_money.final_feature.market_phase_1h is \\\"distribution_divergence\\\", with accumulation_persistence_1h at 0.0 and distribution_persistence_1h at 1.0.\",\"snapshot.smart_money.final_feature.market_phase_12h is \\\"distribution_divergence\\\"; holdings_change_12h_pct is -0.5162 and negative_holdings_delta_hours_12h is 8.\",\"snapshot.smart_money.final_feature.holder_count_change_4h is -1, providing no holder-growth confirmation.\",\"snapshot.flow_intelligence.data.top_pnl_net_flow_usd is -923715.04, materially opposing the positive flows from other cohorts.\",\"snapshot.token_information.data.sell_volume_usd is 14261707.60 versus buy_volume_usd of 14004537.10, while unique_sellers is 12865 versus 11327 unique_buyers.\",\"snapshot.smart_money.final_feature.price_return_4h_pct is -8.2402, indicating substantial recent downside volatility.\"],\"evidence_for\":[\"snapshot.smart_money.final_feature.market_phase_4h is \\\"accumulation_divergence\\\" and flow_price_divergence_4h_pct is 8.5937.\",\"snapshot.smart_money.final_feature.holdings_change_4h_pct is 0.3535 and holdings_acceleration_4h_pct_per_hour is 2.0197.\",\"snapshot.smart_money.final_feature.price_return_1h_pct is 2.7102, showing a short-term rebound.\",\"snapshot.flow_intelligence.data.smart_trader_net_flow_usd is 235644.47 and public_figure_net_flow_usd is 260565.24.\",\"snapshot.token_information.data.liquidity_usd is 2325477.12 relative to snapshot.selection.virtual_notional_usd of 1000.0.\"],\"expected_direction_4h\":\"FLAT\",\"missing_evidence\":[\"snapshot.flow_intelligence.warnings.present is true with count 2, but warning details are not supplied.\",\"snapshot.flow_intelligence.data.fresh_wallets_wallet_count and exchange_wallet_count are both 0 despite nonzero corresponding net-flow fields, limiting flow interpretation.\",\"No order-book depth, spread, slippage, or short-interval price structure is supplied.\"],\"rationale\":\"The four-hour accumulation and improving holdings metrics are constructive, but they conflict with one-hour and twelve-hour distribution signals, declining four-hour holder count, negative top-PnL flow, and slightly sell-heavy activity. With recent high volatility and unresolved flow-data inconsistencies, the snapshot does not provide sufficient directional agreement for a four-hour LONG.\",\"risk_flags\":[\"INCOMPLETE_DATA\",\"EXCHANGE_PRESSURE\",\"HIGH_VOLATILITY\",\"MODEL_UNCERTAINTY\"]}"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "context": "all_turns",
+    "effort": "high",
+    "mode": "standard",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": false,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "description": null,
+      "name": "prospective_pass_1",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "LONG",
+              "ABSTAIN"
+            ],
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "evidence_against": {
+            "items": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "evidence_for": {
+            "items": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "expected_direction_4h": {
+            "enum": [
+              "UP",
+              "FLAT",
+              "DOWN"
+            ],
+            "type": "string"
+          },
+          "missing_evidence": {
+            "items": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "rationale": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "risk_flags": {
+            "items": {
+              "enum": [
+                "LOW_LIQUIDITY",
+                "INCOMPLETE_DATA",
+                "STALE_DATA",
+                "FLOW_CONCENTRATION",
+                "EXCHANGE_PRESSURE",
+                "HIGH_VOLATILITY",
+                "EXECUTION_RISK",
+                "MODEL_UNCERTAINTY"
+              ],
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "confidence",
+          "expected_direction_4h",
+          "evidence_for",
+          "evidence_against",
+          "missing_evidence",
+          "rationale",
+          "risk_flags"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tool_usage": {
+    "image_gen": {
+      "input_tokens": 0,
+      "input_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "total_tokens": 0
+    },
+    "web_search": {
+      "num_requests": 0
+    }
+  },
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 4680,
+    "input_tokens_details": {
+      "cache_write_tokens": 4677,
+      "cached_tokens": 0
+    },
+    "output_tokens": 1098,
+    "output_tokens_details": {
+      "reasoning_tokens": 516
+    },
+    "total_tokens": 5778
+  },
+  "user": null,
+  "metadata": {}
+}

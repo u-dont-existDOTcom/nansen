@@ -1,0 +1,189 @@
+{
+  "id": "resp_0387527bdd85a084016a83bc804f6487d2b82261632e678d5c",
+  "object": "response",
+  "created_at": 1787018368,
+  "status": "completed",
+  "background": false,
+  "billing": {
+    "payer": "developer"
+  },
+  "completed_at": 1787018379,
+  "error": null,
+  "frequency_penalty": 0.0,
+  "incomplete_details": null,
+  "instructions": "You are an independent prospective market analyst. Analyze only the supplied identity-blinded, point-in-time snapshot. Choose LONG or ABSTAIN for a fixed four-hour paper objective. Cite only field paths that exist in the supplied snapshot. Do not infer token identity, use tools, request outside data, or discuss future outcomes. Return only the required structured object.",
+  "max_output_tokens": 4000,
+  "max_tool_calls": null,
+  "model": "gpt-5.6-sol",
+  "moderation": null,
+  "output": [
+    {
+      "id": "rs_0387527bdd85a084016a83bc8191fc87d2a5cf8ba04914c677",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqg7yL-X2Gn_f9mRS9adJx-m207ZUSWcHfTA0JPNimp70GLedhKJ0kGxHgsA7uB1GuK6Haz5zZFt817vOnX2p7ckLLxBPXPBm7dsyif_bwG3C6yNaMRzBKjsT3UTTz9e4w4_k7FKiE7CxLBoS7fIVw_c05UFpd5iP93Aaqbgqe1ccaS6OB4LeErFukhqy2a-4oezhj-1hTBiuw-SQ2JO5gtGjQ7ESs7XxPlY76zwDKAgcU-yp0HIt88za8zyiPKD7ryluox1wPhhyR41UgRlSSWd80Z1rqTtWcibdUOzw8r64oLOuFFIh9tddsvOZURV_1cFnJ3nGq0LSMRpX5fe8ZEVyOULLDKciSwBtojkv_3BhfAcZh7L7gnMdxIgTkRgFf9TuobN5sbSZeY20K58-1clREAiIe-oDKmpPPUWm1RYRH7vNTR-_vnIkgTfUviWwaudYnYXksFBdpHXgsORUDLJRZ_FG9QwFcxlDjgx7bTPUBbwnmPddmDlYQn26_2pfgb73wMb9cngq_VgDxZexmJmADKAM6oyyu7_byzkITZSv64gGthD-m3Ke5G7NNjjX5BDgy-bf7fLsxVHYqQ6YqvxjpUffoj8THWF069d73vYjaZpKLKusmtJ4H3nVdlkRIwY8VCbdT6VisbFKVhPCDiQvAijpKCE2YgJvlhzYXofQZAWqQadLBqpbJdUx_8ZURP2H99fr5c-8mAULQwUBvHr0tzvSYQHDYLod_FfLvbM_qu1iBPMLTf6gazUHrckEqxqix699AmEabJKgF6YAtBAQJyl-bU4boTryzncnRSQwegyx9SvFrXcUOBk66YlHhcLZQhsqM6ulWGJoXJiJcDzdOtcK1ieTtq83eXdJ-9bzGA05LJpUXgXdYULEdqXLPnZAK55KFnZYtKW2NfGJ1zDeTK_XxfKZCs-p_3uasYESonHUdhTCoNNnEFWB0TvZJMKy7ormxHo7oUzXUYVK1_gWQ1P1WCPxrGnNdIP3LVl0-BTI9rgWj3PzJyG5qJYGwqzFOp7mEVTk8Ke9uQQ7dqLk5k1StQUC91fQcNNEvsvvCiDRxQDkaJHJHCnbB3oSOOmMW81zGLfqeLklgRBmRz6ld6RbGn4sE4vTxPORNas03M6U-GH9JDZnv7PojM7Bp-Bsw2LhuQQC62wz1ZglnTiUEBT5kNJ3LEnFM2nai7cuCe9AF9B4gjaf9UY1xsTF0VdeM9z4Z3TCv-oTYfHqUxEWIYQMgDyEjTbMJjPxVGlTJR77RFkOeQfdLqNCB_EGO-RuVbH83MLZ-wWdWnA-td_I68Srjw0MKqFRyq4JlvvVJAlk4mtSNd94ZUTwlQEXDsfwIqY_4CBdNcztj4uYd4LQlH7T6ROqmxKHtDlOyS5X_dnafputpKsbyG4yyHz5cIEaiAB8ducfV_3xQw1VbXRAsu1iMYEYiRkr5AR9Z0g0h6-88knGFSN1fpx-2VtH4MFbajHD6qWIknmOvJKJFU6orr1aVr-NE6XyBczJ_E3ygQpP9WiMdoMnYUNsy8vZeS6C8PbuYqDfDFNlXeJuZFPTZXZb9vnuFX3MrtLeDA4wLqyn2-AG4vQfCSXOtby1PmRyj4TsdK35yXVx_EZXum7hfN--VDEd8BdtbAuOPQN6AWa1Oe8Ruxy16KHtl2zASwA3mZ-An9-Fg6k0uYH9xz0rQaauz4uTCpPNQZLl0FomW5AOyWn0shHKB2nLOf4bCewYBA9jqhHJTotIEBxyxdNBAm0JlVNlKb0Z20hmzziBsvvCJfqagG3Nl9mUGWkOfqZ_B-XhubqfEyqI68jPfEBLRHpzLN1c5hGzN7BzvOTNDSSec_2Na8Rwc1TtCdcewvdCHmzAe3H8pxFZMrUinABNWbZ-rJh0SxJZPwfdpZaX58537KKQDkpPkx7BZ0UZ0-E9-pd3EzLFp4Ja0Wc7YphkPTrvMgFJauJ1fF77rkMRq7XlgoYBGu8m7hkW98B2Ra6vwa4FoXPZ7jfZCZdaQGQLZ2HQ9Wwax0bKIuJrfkD31n3gvrfhuiFI2XLDXgoJ90eWkmmfCeXGudIKv3yGv2QxrBrtaONnOb8PMRYrLlmwlgR1-pacDsb3fb11wFpSR3PY5iElpeYeVWcYUxlFaq06_mMAjBCWJYqKFHPI08OYZlckQoJRC5C8wAYgpftZ9IEiC8pBaEayC4AuDWYB9KjPO8k69uH9b52Dr4x3oHnEXDbJH03RSEyNDeAT5aAs5tEgxzLRqse7qgjkTgzaV9fvQTK-h3MkHcRVJ5fvU3BMg_lb7AVP9g2MB8oIvuIgu0K1g3k0a5WiA_OhaA4p3xx4roIW6nksxv6U6XsDcOnlSMXnHVaKcJAV_spMsF4IFsZ1RrxoGM79Oi8wo253s48GFwJ-lGAaLyodflZH5-8Amghsyzxk0lQ9sbdIgHaS-LwxLoZQw6M7kqK8XfoTFHMA1fDSb3dgol5-MgDLC8vsLMIEFLSmyhgzz0h_nEipTqXsmdv_Bg4WhP2fbYovARMmu0DuyTQmEn5UF9Z7TbzpblHR4BDcVj6WLGg36I4tWn836iT-WU0GcTwG65Dhdexjb-uj4zU53F5hshxLGneBr5fjcRmkMaxGyC7XD4fc06INwClc8eEa2CBcWWlWLmOJj56JwlPoyv4kJWfJrFS3c_JkhxtTgrCUr2HeNw292HJ0Sr7e7v3--S_pcM87ATDnke2ehzUvdAk82TXBFkDi2M-7sa3HyufikUBGXatN1MIhW7A7asG_JaZB1390poytuDGFpFQYDyrsmRQ6T1csHZTzbPGtq_96C_u31Mf_IEYeTJVcuAP9r4y7K-nh3-HHVxUSynzPUgNRWqO0X91G8kLDws5AyzfMLRUxKg2FsSQ4ahaBF3HHC9eNXYroxtrUoTObKMXdj_8BeLjUSHwHKiK5JmLMtdu-lwgaWTqNEhLCKP1_uJBvxOPirMbeoGL4pvTIJnaqa8-UEeHUxZ81NAnA=",
+      "summary": []
+    },
+    {
+      "id": "msg_0387527bdd85a084016a83bc85ee6087d28781fc74003aa849",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "{\"action\":\"ABSTAIN\",\"confidence\":0.79,\"evidence_against\":[\"original_input.snapshot.smart_money.final_feature.market_phase_1h=\\\"distribution_divergence\\\"; distribution_persistence_1h=1.0 and accumulation_persistence_1h=0.0.\",\"original_input.snapshot.smart_money.final_feature.market_phase_12h=\\\"distribution_divergence\\\" and holdings_change_12h_pct=-0.5162.\",\"original_input.snapshot.smart_money.final_feature.holder_count_change_4h=-1 and negative_holdings_delta_hours_4h=2.\",\"original_input.snapshot.flow_intelligence.data.top_pnl_net_flow_usd=-923715.04.\",\"original_input.snapshot.token_information.data.sell_volume_usd=14261707.60 exceeds buy_volume_usd=14004537.10.\",\"original_input.snapshot.smart_money.final_feature.price_return_4h_pct=-8.2402, indicating pronounced recent downside.\"],\"evidence_for\":[\"original_input.snapshot.smart_money.final_feature.market_phase_4h=\\\"accumulation_divergence\\\" and flow_price_divergence_4h_pct=8.5937.\",\"original_input.snapshot.smart_money.final_feature.holdings_change_4h_pct=0.3535 and holdings_acceleration_4h_pct_per_hour=2.0197.\",\"original_input.snapshot.smart_money.final_feature.price_return_1h_pct=2.7102, showing a short-term rebound.\",\"original_input.snapshot.flow_intelligence.data.smart_trader_net_flow_usd=235644.47 and public_figure_net_flow_usd=260565.24.\",\"original_input.snapshot.token_information.data.liquidity_usd=2325477.12 versus original_input.snapshot.selection.virtual_notional_usd=1000.0.\"],\"expected_direction_4h\":\"FLAT\",\"missing_evidence\":[\"original_input.snapshot.flow_intelligence.warnings.present=true with count=2, but no warning details are supplied.\",\"original_input.snapshot.flow_intelligence.data.fresh_wallets_wallet_count=0 despite fresh_wallets_net_flow_usd=5564693.32.\",\"original_input.snapshot.flow_intelligence.data.exchange_wallet_count=0 despite exchange_net_flow_usd=501917.20.\",\"original_input.snapshot.smart_money.warnings.present=true with count=1, but no warning details are supplied.\"],\"rationale\":\"Four-hour accumulation divergence, positive holdings change, and a one-hour rebound are constructive. However, they conflict with one-hour and twelve-hour distribution divergence, weak holder confirmation, negative top-PnL flow, sell-heavy aggregate volume, and an 8.24% four-hour decline. Unresolved warning and wallet-count inconsistencies further reduce confidence in the flow signals. Directional agreement is insufficient for a four-hour LONG, so ABSTAIN is preferred with a FLAT expectation.\",\"risk_flags\":[\"INCOMPLETE_DATA\",\"EXCHANGE_PRESSURE\",\"HIGH_VOLATILITY\",\"MODEL_UNCERTAINTY\"]}"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ],
+  "parallel_tool_calls": true,
+  "presence_penalty": 0.0,
+  "previous_response_id": null,
+  "prompt_cache_key": null,
+  "prompt_cache_retention": "24h",
+  "reasoning": {
+    "context": "all_turns",
+    "effort": "high",
+    "mode": "standard",
+    "summary": null
+  },
+  "safety_identifier": null,
+  "service_tier": "default",
+  "store": false,
+  "temperature": 1.0,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "description": null,
+      "name": "prospective_pass_1",
+      "schema": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "LONG",
+              "ABSTAIN"
+            ],
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "evidence_against": {
+            "items": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "evidence_for": {
+            "items": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "expected_direction_4h": {
+            "enum": [
+              "UP",
+              "FLAT",
+              "DOWN"
+            ],
+            "type": "string"
+          },
+          "missing_evidence": {
+            "items": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 12,
+            "type": "array"
+          },
+          "rationale": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "risk_flags": {
+            "items": {
+              "enum": [
+                "LOW_LIQUIDITY",
+                "INCOMPLETE_DATA",
+                "STALE_DATA",
+                "FLOW_CONCENTRATION",
+                "EXCHANGE_PRESSURE",
+                "HIGH_VOLATILITY",
+                "EXECUTION_RISK",
+                "MODEL_UNCERTAINTY"
+              ],
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "confidence",
+          "expected_direction_4h",
+          "evidence_for",
+          "evidence_against",
+          "missing_evidence",
+          "rationale",
+          "risk_flags"
+        ],
+        "type": "object"
+      },
+      "strict": true
+    },
+    "verbosity": "medium"
+  },
+  "tool_choice": "auto",
+  "tool_usage": {
+    "image_gen": {
+      "input_tokens": 0,
+      "input_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "output_tokens": 0,
+      "output_tokens_details": {
+        "image_tokens": 0,
+        "text_tokens": 0
+      },
+      "total_tokens": 0
+    },
+    "web_search": {
+      "num_requests": 0
+    }
+  },
+  "tools": [],
+  "top_logprobs": 0,
+  "top_p": 0.98,
+  "truncation": "disabled",
+  "usage": {
+    "input_tokens": 6002,
+    "input_tokens_details": {
+      "cache_write_tokens": 5999,
+      "cached_tokens": 0
+    },
+    "output_tokens": 856,
+    "output_tokens_details": {
+      "reasoning_tokens": 248
+    },
+    "total_tokens": 6858
+  },
+  "user": null,
+  "metadata": {}
+}
