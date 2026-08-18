@@ -1033,6 +1033,15 @@ def _verified_request_attempt_count(root: Path, guard: BudgetGuard) -> int:
         base = root / "raw/nansen" / entry.reservation_id
         request_path = base / "attempt-1-request.json"
         if entry.request_artifact_sha256 is None:
+            response_path = base / "attempt-1-response.json"
+            metadata_path = base / "attempt-1-response-metadata.json"
+            if (
+                entry.state == "failed_before_pricing"
+                and not request_path.exists()
+                and not response_path.exists()
+                and not metadata_path.exists()
+            ):
+                continue
             raise HistoricalDiscoveryError("budget entry has no bound request-attempt artifact")
         _regular_relative_path(root, request_path, label="Nansen request-attempt artifact")
         if _sha256_file(request_path) != entry.request_artifact_sha256:

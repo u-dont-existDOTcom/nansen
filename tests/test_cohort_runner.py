@@ -23,17 +23,9 @@ from src.nansen_signal_lab.cohort_schema import (
     STRATEGY_SOURCE_PATH,
     initialize_cohort_program,
 )
-from src.nansen_signal_lab.evaluation import load_evaluation_manifest
 
 
 SCHEDULED = datetime(2026, 8, 24, 12, 5, tzinfo=timezone.utc)
-
-
-@pytest.fixture(autouse=True)
-def _frozen_bundle_without_copying_the_full_lineage(monkeypatch):
-    source = Path(__file__).resolve().parents[1]
-    bundle = load_evaluation_manifest(source / STRATEGY_SOURCE_PATH)
-    monkeypatch.setattr(cohort_runner, "load_evaluation_manifest", lambda _: bundle)
 
 
 class MutableClock:
@@ -88,11 +80,11 @@ def _flow(change: float):
             "value_usd": amount * 10,
             "holders_count": 10 + index,
             "total_inflows_count": 1,
-            "total_outflows_count": 1,
+            "total_outflows_count": -1,
             "total_inflows_dex": 1,
-            "total_outflows_dex": 1,
+            "total_outflows_dex": -1,
             "total_inflows_cex": 1,
-            "total_outflows_cex": 1,
+            "total_outflows_cex": -1,
         })
     return {"data": rows, "pagination": {"page": 1, "per_page": 1000, "is_last_page": True}}
 
@@ -179,6 +171,8 @@ class FakeNansen:
         malformed_first_flow: bool = False,
         malformed_first_dex: bool = False,
         invalid_account: bool = False,
+        partial_entry: bool = False,
+        screener_body: dict | None = None,
     ):
         self.clock = clock
         self.remaining = remaining
@@ -188,6 +182,8 @@ class FakeNansen:
         self.malformed_first_flow = malformed_first_flow
         self.malformed_first_dex = malformed_first_dex
         self.invalid_account = invalid_account
+        self.partial_entry = partial_entry
+        self.screener_body = screener_body
         self.flow_calls = 0
         self.dex_calls = 0
 
@@ -214,7 +210,7 @@ class FakeNansen:
                 })
         else:
             if endpoint == "token-screener":
-                body = _screener()
+                body = json.loads(json.dumps(self.screener_body or _screener()))
             elif endpoint == "tgm/flows":
                 body = _flow(0.01 if payload["label"] == "smart_money" else -0.01)
                 self.flow_calls += 1
@@ -230,6 +226,12 @@ class FakeNansen:
                         body["data"] = []
             elif endpoint == "tgm/dex-trades":
                 body = _trade(payload)
+                if self.partial_entry and payload["filters"]["action"] == "BUY":
+                    body["data"][0].update(
+                        token_amount=0.1,
+                        traded_token_amount=1.0,
+                        estimated_value_usd=1.0,
+                    )
                 page = payload["pagination"]["page"]
                 body["pagination"]["page"] = page
                 if self.two_pages:
@@ -300,6 +302,30 @@ def test_full_cycle_collects_every_counterfactual_and_replays(tmp_path):
     assert replay_program(program)["terminal_cycles"] == 1
 
 
+def test_direct_replay_rejects_archived_runtime_drift(tmp_path):
+    program = _program(tmp_path)
+    archived_module = (
+        program.root
+        / "contracts/implementation/src/nansen_signal_lab/cohort_selection.py"
+    )
+    archived_module.write_text(archived_module.read_text() + "\n# drift\n")
+
+    with pytest.raises(
+        Exception,
+        match="archived protocol implementation bytes differ",
+    ):
+        replay_program(program)
+
+
+def test_decisions_use_program_local_comparators_after_source_is_removed(tmp_path):
+    program = _program(tmp_path)
+    (program.root.parents[2] / STRATEGY_SOURCE_PATH).unlink()
+    clock = MutableClock(SCHEDULED)
+    fake = FakeNansen(clock)
+    state = start_cycle(program, 1, nansen=fake, clock=clock, sleep=lambda _: None)
+    assert state["stage"] == "decisions_sealed"
+
+
 def test_late_cycle_terminalizes_without_provider_access(tmp_path):
     program = _program(tmp_path)
     clock = MutableClock(SCHEDULED + timedelta(minutes=16))
@@ -308,6 +334,22 @@ def test_late_cycle_terminalizes_without_provider_access(tmp_path):
     assert state["stage"] == "unscorable"
     assert fake.calls == []
     assert check_cycle(program, 1)["attempts"] == 0
+
+
+def test_early_cycle_start_is_nonterminal_and_can_run_on_schedule(tmp_path):
+    program = _program(tmp_path)
+    clock = MutableClock(SCHEDULED - timedelta(seconds=1))
+    fake = FakeNansen(clock)
+    with pytest.raises(Exception, match="cannot start before"):
+        start_cycle(program, 1, nansen=fake, clock=clock, sleep=lambda _: None)
+    assert fake.calls == []
+    assert json.loads(
+        (program.root / "cycles/cycle-01/state.json").read_text()
+    )["stage"] == "planned"
+    clock.value = SCHEDULED
+    assert start_cycle(
+        program, 1, nansen=fake, clock=clock, sleep=lambda _: None
+    )["stage"] == "decisions_sealed"
 
 
 def test_settlement_too_early_is_nonterminal_and_makes_no_calls(tmp_path):
@@ -363,6 +405,32 @@ def test_invalid_complete_header_account_body_stops_before_paid_access(tmp_path)
     assert check_cycle(program, 1)["credits"] == 0
 
 
+@pytest.mark.parametrize(
+    "mutation,reason",
+    (
+        (lambda body: body["pagination"].update(is_last_page=False), "insufficient_universe"),
+        (
+            lambda body: body.update(
+                data=[row for row in body["data"] if row["token_symbol"] != "MIDDLE"]
+            ),
+            "insufficient_strata",
+        ),
+    ),
+)
+def test_selection_failures_preserve_frozen_terminal_reason(
+    tmp_path, mutation, reason
+):
+    body = _screener()
+    mutation(body)
+    program = _program(tmp_path)
+    clock = MutableClock(SCHEDULED)
+    fake = FakeNansen(clock, screener_body=body)
+    state = start_cycle(program, 1, nansen=fake, clock=clock, sleep=lambda _: None)
+    assert state["stage"] == "unscorable"
+    assert state["terminal_reason"] == reason
+    assert [call[1] for call in fake.calls] == ["account", "token-screener"]
+
+
 def test_first_malformed_feature_and_outcome_fail_fast(tmp_path):
     program = _program(tmp_path)
     clock = MutableClock(SCHEDULED)
@@ -391,6 +459,46 @@ def test_first_malformed_feature_and_outcome_fail_fast(tmp_path):
     )
     assert state["stage"] == "unscorable"
     assert bad_outcome.dex_calls == 1
+
+
+def test_partial_entry_preserves_the_observed_exit_fill(tmp_path):
+    program = _program(tmp_path)
+    clock = MutableClock(SCHEDULED)
+    fake = FakeNansen(clock, partial_entry=True)
+    assert start_cycle(
+        program, 1, nansen=fake, clock=clock, sleep=lambda _: None
+    )["stage"] == "decisions_sealed"
+    clock.value = datetime(2026, 8, 24, 16, 31, tzinfo=timezone.utc)
+    assert settle_cycle(
+        program, 1, nansen=fake, clock=clock, sleep=lambda _: None
+    )["stage"] == "outcome_sealed"
+    outcome = json.loads(
+        (program.root / "cycles/cycle-01/derived/outcomes/token-01.json").read_text()
+    )
+    assert outcome["outcome"]["status"] == "UNFILLED_ENTRY"
+    assert outcome["outcome"]["entry_fill"]["filled_token_amount"] == 0.1
+    assert outcome["outcome"]["exit_fill"]["filled_token_amount"] == 0.1
+    assert outcome["utc_week"] == "2026-W35"
+
+
+def test_outcome_failure_keeps_sealed_opportunities_signals_and_attempts(tmp_path):
+    program = _program(tmp_path)
+    clock = MutableClock(SCHEDULED)
+    fake = FakeNansen(clock, malformed_first_dex=True)
+    assert start_cycle(
+        program, 1, nansen=fake, clock=clock, sleep=lambda _: None
+    )["stage"] == "decisions_sealed"
+    clock.value = datetime(2026, 8, 24, 16, 31, tzinfo=timezone.utc)
+    assert settle_cycle(
+        program, 1, nansen=fake, clock=clock, sleep=lambda _: None
+    )["stage"] == "unscorable"
+    records, _, selected, attempted = cohort_runner._aggregate_records(program)
+    primary = [row for row in records if row["rule_id"] == cohort_runner._H5]
+    assert selected == 5
+    assert attempted == 1
+    assert len(primary) == 5
+    assert all(row["action"] == "LONG" for row in primary)
+    assert all(row["outcome"]["status"] == "UNAVAILABLE" for row in primary)
 
 
 def test_unsealed_extra_evidence_is_rejected(tmp_path):
@@ -539,6 +647,34 @@ def test_pretransmission_reservation_crash_resumes_safely(tmp_path, monkeypatch)
     state = start_cycle(program, 1, nansen=fake, clock=clock, sleep=lambda _: None)
     assert state["stage"] == "decisions_sealed"
     assert len(fake.calls) == 22
+
+
+def test_late_resume_cancels_unbound_pretransmission_reservation(
+    tmp_path, monkeypatch
+):
+    program = _program(tmp_path)
+    clock = MutableClock(SCHEDULED)
+    fake = FakeNansen(clock)
+    original = prospective_runner._install_json
+
+    def crash_before_request_artifact(path, value, *, kind):
+        if kind == "nansen_request":
+            raise OSError("simulated crash before request artifact installation")
+        return original(path, value, kind=kind)
+
+    monkeypatch.setattr(
+        prospective_runner, "_install_json", crash_before_request_artifact
+    )
+    with pytest.raises(OSError, match="before request artifact"):
+        start_cycle(program, 1, nansen=fake, clock=clock, sleep=lambda _: None)
+    assert fake.calls == []
+    monkeypatch.setattr(prospective_runner, "_install_json", original)
+    clock.value = SCHEDULED + timedelta(minutes=46)
+    state = start_cycle(program, 1, nansen=fake, clock=clock, sleep=lambda _: None)
+    assert state["stage"] == "unscorable"
+    checked = check_cycle(program, 1)
+    assert checked["attempts"] == 0
+    assert checked["credits"] == 0
 
 
 def test_request_write_before_ledger_bind_becomes_ambiguous_without_transmission(

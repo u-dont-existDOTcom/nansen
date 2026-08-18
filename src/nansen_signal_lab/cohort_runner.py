@@ -15,6 +15,7 @@ from .artifacts import (
     write_json_once,
 )
 from .budget import BudgetError, BudgetGuard, canonical_request_sha256
+from .client import NansenRequestFailure
 from .cohort_aggregate import aggregate_rule
 from .cohort_execution import (
     CohortExecutionError,
@@ -37,6 +38,7 @@ from .cohort_features import (
     wbs_payload,
 )
 from .cohort_schema import (
+    COMPARATOR_PATH,
     CYCLE_COUNT,
     MAX_CYCLE_ATTEMPTS,
     MAX_CYCLE_CREDITS,
@@ -46,11 +48,11 @@ from .cohort_schema import (
     CohortSchemaError,
     EXPECTED_CONTRACT_SHA256,
     EXPECTED_STRATEGY_SHA256,
-    STRATEGY_SOURCE_PATH,
     load_cohort_program,
     parse_utc,
     remaining_required_credits,
     utc_text,
+    validate_runtime_implementation,
 )
 from .cohort_selection import (
     CohortSelectionError,
@@ -59,12 +61,12 @@ from .cohort_selection import (
     screener_payload,
     select_cohort,
 )
-from .evaluation import EvaluationError, load_evaluation_manifest
 from .historical_discovery import _response_for, _verified_request_attempt_count
 from .prospective_comparators import (
     ComparatorError,
     ComparatorDecision,
     evaluate_comparators,
+    load_cohort_comparators,
     pair_distribution_veto,
 )
 from .prospective_runner import PilotError, _nansen_call
@@ -159,6 +161,7 @@ def _assert_no_symlinks(root: Path, *, label: str) -> None:
 
 
 def _validate_program_container(program: CohortProgram) -> None:
+    validate_runtime_implementation(program)
     _assert_no_symlinks(program.root, label="cohort program")
     expected_top = {"program.json", "contracts"}
     if (program.root / "cycles").exists():
@@ -171,6 +174,9 @@ def _validate_program_container(program: CohortProgram) -> None:
     if {path.name for path in contracts.iterdir()} != {
         "nansen-openapi.json",
         "frozen-strategy-manifest.json",
+        "frozen-comparator-definitions.json",
+        "protocol-implementation.json",
+        "implementation",
     }:
         raise CohortRunnerError("cohort program contracts directory differs")
     derived = program.root / "derived"
@@ -569,15 +575,32 @@ def _candidate(member: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _token_week(candidate: dict[str, Any], decision_t0: datetime) -> dict[str, str]:
+    chain, address = normalized_identity(
+        candidate["chain"], candidate["token_address"]
+    )
+    iso_year, iso_week, _ = decision_t0.isocalendar()
+    week = f"{iso_year:04d}-W{iso_week:02d}"
+    return {
+        "utc_week": week,
+        "token_week_id": f"{chain}:{address}:{week}",
+    }
+
+
 def _second_page_required(body: Any, *, label: str) -> bool:
-    if not isinstance(body, dict) or not isinstance(body.get("pagination"), dict):
+    if (
+        not isinstance(body, dict)
+        or not isinstance(body.get("data"), list)
+        or len(body["data"]) > 1000
+        or not isinstance(body.get("pagination"), dict)
+    ):
         raise CohortRunnerError(f"{label} response pagination is missing")
     pagination = body["pagination"]
     if (
-        pagination.get("page") != 1
-        or isinstance(pagination.get("page"), bool)
+        type(pagination.get("page")) is not int
+        or pagination.get("page") != 1
+        or type(pagination.get("per_page")) is not int
         or pagination.get("per_page") != 1000
-        or isinstance(pagination.get("per_page"), bool)
         or not isinstance(pagination.get("is_last_page"), bool)
     ):
         raise CohortRunnerError(f"{label} response pagination is invalid")
@@ -669,7 +692,33 @@ def _unscorable(
 ) -> dict[str, Any]:
     root, state = _load_cycle(program, cycle_index)
     if state["stage"] in _TERMINAL:
+        check_cycle(program, cycle_index)
         return state
+    guard = BudgetGuard(root, MAX_CYCLE_CREDITS, MAX_CYCLE_CREDITS)
+    for entry in guard.replay().entries:
+        if entry.state != "reserved":
+            continue
+        request_path = (
+            root
+            / "raw/nansen"
+            / entry.reservation_id
+            / f"attempt-{entry.attempt_count}-request.json"
+        )
+        if entry.request_artifact_sha256 is None and not request_path.exists():
+            guard.fail(
+                entry,
+                NansenRequestFailure(
+                    "cycle terminalized before request transmission",
+                    transmitted=False,
+                ),
+                failure_artifact_sha256=None,
+            )
+            continue
+        if entry.request_artifact_sha256 is None:
+            if request_path.is_symlink() or not request_path.is_file():
+                raise CohortRunnerError("unbound request artifact is not a regular file")
+            entry = guard.bind_request_artifact(entry, _sha256_file(request_path))
+        guard.reconcile_inflight()
     intent_path = root / "derived/unscorable-intent.json"
     if intent_path.exists():
         intent = _read_json(intent_path, label="unscorable intent")
@@ -726,6 +775,11 @@ def start_cycle(
             )
     scheduled = parse_utc(state["scheduled_at"], field="scheduled_at")
     decision_deadline = scheduled + _DECISION_DEADLINE
+    now = _clock_value(clock)
+    if state["stage"] == "planned" and now < scheduled:
+        raise CohortRunnerError(
+            f"cycle collection cannot start before {utc_text(scheduled)}"
+        )
     for prior in range(1, cycle_index):
         prior_root = _cycle_root(program, prior)
         if not prior_root.exists():
@@ -744,8 +798,7 @@ def start_cycle(
                 clock=clock,
             )
         check_cycle(program, prior)
-    now = _clock_value(clock)
-    if state["stage"] == "planned" and not scheduled <= now <= scheduled + timedelta(minutes=15):
+    if state["stage"] == "planned" and now > scheduled + timedelta(minutes=15):
         return _unscorable(
             program,
             cycle_index,
@@ -761,10 +814,11 @@ def start_cycle(
         )
     guard = BudgetGuard(root, MAX_CYCLE_CREDITS, MAX_CYCLE_CREDITS)
     try:
-        strategy_source = program.root.parents[2] / STRATEGY_SOURCE_PATH
-        if _sha256_file(strategy_source) != EXPECTED_STRATEGY_SHA256:
-            raise CohortRunnerError("frozen strategy source hash differs")
-        bundle = load_evaluation_manifest(strategy_source)
+        bundle = load_cohort_comparators(
+            program.root / COMPARATOR_PATH,
+            program.manifest["comparator_sha256"],
+            expected_source_sha256=EXPECTED_STRATEGY_SHA256,
+        )
         if state["stage"] == "planned":
             live_contract_path = _match_live_contract(root, nansen)
             account_body, account_paths, _ = _call(
@@ -1004,9 +1058,16 @@ def start_cycle(
             ) >= t0:
                 raise CohortRunnerError("decision seal was not recorded before t0")
         return state
-    except (CohortRunnerError, CohortSchemaError, CohortSelectionError,
+    except CohortSelectionError as exc:
+        return _unscorable(
+            program,
+            cycle_index,
+            reason=exc.reason_code or f"{type(exc).__name__}: {exc}",
+            clock=clock,
+        )
+    except (CohortRunnerError, CohortSchemaError,
             CohortFeatureError, CohortExecutionError, BudgetError, PilotError,
-            EvaluationError, ComparatorError, ValueError, KeyError, TypeError) as exc:
+            ComparatorError, ValueError, KeyError, TypeError) as exc:
         return _unscorable(
             program, cycle_index, reason=f"{type(exc).__name__}: {exc}", clock=clock
         )
@@ -1023,6 +1084,7 @@ def settle_cycle(
     _validate_program_container(program)
     root, state = _load_cycle(program, cycle_index)
     if state["stage"] in _TERMINAL:
+        check_cycle(program, cycle_index)
         return state
     if state["stage"] != "decisions_sealed":
         raise CohortRunnerError("cycle must have sealed decisions before settlement")
@@ -1100,7 +1162,7 @@ def settle_cycle(
             )
             sell_pages = collect_dex("SELL", "exit_start", "exit_end")
             exit_fill = None
-            if entry.is_complete:
+            if entry.filled_token_amount > 0:
                 exit_fill = build_exit_fill(
                     sell_pages, candidate=candidate,
                     token_amount=entry.filled_token_amount,
@@ -1125,6 +1187,7 @@ def settle_cycle(
             outcome = {
                 "token_index": token_index,
                 "identity": candidate,
+                **_token_week(candidate, windows["ohlcv_start"]),
                 "outcome": score_counterfactual(
                     entry_fill=entry,
                     exit_fill=exit_fill,
@@ -1206,7 +1269,7 @@ def _assert_request_artifact(
             f"attempt-{entry.attempt_count}-response-metadata.json"
         )
         if (
-            entry.state == "reserved"
+            entry.state in {"reserved", "failed_before_pricing"}
             and not path.exists()
             and not response_path.exists()
             and not metadata_path.exists()
@@ -1663,10 +1726,11 @@ def _semantic_replay(
     if semantic_stage == "features_sealed":
         return
 
-    strategy_source = program.root.parents[2] / STRATEGY_SOURCE_PATH
-    if _sha256_file(strategy_source) != EXPECTED_STRATEGY_SHA256:
-        raise CohortRunnerError("frozen strategy source hash differs")
-    bundle = load_evaluation_manifest(strategy_source)
+    bundle = load_cohort_comparators(
+        program.root / COMPARATOR_PATH,
+        program.manifest["comparator_sha256"],
+        expected_source_sha256=EXPECTED_STRATEGY_SHA256,
+    )
     clock_document = _read_json(root / "derived/decision-clock.json", label="decision clock")
     if set(clock_document) != {"schema_version", "computed_at", "decision_t0"} or clock_document.get("schema_version") != 1:
         raise CohortRunnerError("decision clock schema differs")
@@ -1788,7 +1852,7 @@ def _semantic_replay(
             end=windows["entry_end"],
         )
         exit_fill = None
-        if entry_fill.is_complete:
+        if entry_fill.filled_token_amount > 0:
             exit_fill = build_exit_fill(
                 pages["SELL"],
                 candidate=candidate,
@@ -1810,6 +1874,7 @@ def _semantic_replay(
         document = {
             "token_index": token_index,
             "identity": candidate,
+            **_token_week(candidate, windows["ohlcv_start"]),
             "outcome": score_counterfactual(
                 entry_fill=entry_fill,
                 exit_fill=exit_fill,
@@ -1921,6 +1986,7 @@ def check_cycle(program: CohortProgram, cycle_index: int) -> dict[str, Any]:
 
 
 def replay_program(program: CohortProgram) -> dict[str, Any]:
+    _validate_program_container(program)
     cycles = []
     for index in range(1, CYCLE_COUNT + 1):
         root = _cycle_root(program, index)
@@ -1942,22 +2008,77 @@ def replay_program(program: CohortProgram) -> dict[str, Any]:
     return result
 
 
-def _aggregate_records(program: CohortProgram) -> tuple[list[dict[str, Any]], set[str]]:
+def _aggregate_records(
+    program: CohortProgram,
+) -> tuple[list[dict[str, Any]], set[str], int, int]:
     records: list[dict[str, Any]] = []
     rule_ids: set[str] = {_H5, _H5_PAIRED}
+    comparator_bundle = load_cohort_comparators(
+        program.root / COMPARATOR_PATH,
+        program.manifest["comparator_sha256"],
+        expected_source_sha256=EXPECTED_STRATEGY_SHA256,
+    )
+    veto_ids = [theory.id for theory in comparator_bundle.theories if theory.role == "veto"]
+    if len(veto_ids) != 1:
+        raise CohortRunnerError("frozen comparator definitions have no unique veto")
+    for theory in comparator_bundle.theories:
+        if theory.role == "veto":
+            continue
+        rule_ids.add(f"{theory.id}::base")
+        rule_ids.add(f"{theory.id}::paired::{veto_ids[0]}")
+    selected_opportunities = 0
+    attempted_counterfactual_fills = 0
     for index in range(1, CYCLE_COUNT + 1):
         root = _cycle_root(program, index)
+        if not root.exists():
+            continue
         state = _read_json(root / "state.json", label="cycle state")
-        if state["stage"] != "outcome_sealed":
+        sealed_stages = {reference["stage"] for reference in state["seals"]}
+        if "universe_sealed" not in sealed_stages:
+            continue
+        panel = _read_json(root / "derived/panel.json", label="cohort panel")
+        members = panel.get("members")
+        if not isinstance(members, list) or len(members) != 5:
+            raise CohortRunnerError("sealed cohort panel is invalid during aggregation")
+        selected_opportunities += len(members)
+        guard = BudgetGuard(root, MAX_CYCLE_CREDITS, MAX_CYCLE_CREDITS)
+        attempted_counterfactual_fills += sum(
+            entry.logical_request_id.endswith("/dex-buy-page-1")
+            and entry.request_artifact_sha256 is not None
+            for entry in guard.replay().entries
+        )
+        if "decisions_sealed" not in sealed_stages:
             continue
         decisions = _read_json(root / "derived/decisions.json", label="cycle decisions")
-        outcomes = _read_json(root / "derived/outcomes.json", label="cycle outcomes")
         scheduled_at = state["scheduled_at"]
         decision_t0 = decisions["decision_t0"]
-        by_index = {row["token_index"]: row["outcome"] for row in outcomes["tokens"]}
+        by_index: dict[int, dict[str, Any]] = {}
+        if state["stage"] == "outcome_sealed":
+            outcomes = _read_json(root / "derived/outcomes.json", label="cycle outcomes")
+            by_index = {
+                row["token_index"]: row["outcome"] for row in outcomes["tokens"]
+            }
+        else:
+            outcomes_root = root / "derived/outcomes"
+            if outcomes_root.exists():
+                for path in sorted(outcomes_root.glob("token-*.json")):
+                    document = _read_json(path, label="partial cycle outcome")
+                    token_index = document.get("token_index")
+                    if (
+                        not isinstance(token_index, int)
+                        or isinstance(token_index, bool)
+                        or not 1 <= token_index <= 5
+                        or token_index in by_index
+                        or not isinstance(document.get("outcome"), dict)
+                    ):
+                        raise CohortRunnerError("partial cycle outcome is invalid")
+                    by_index[token_index] = document["outcome"]
         for decision in decisions["tokens"]:
             identity = decision["identity"]
-            outcome = by_index[decision["token_index"]]
+            outcome = by_index.get(
+                decision["token_index"],
+                {"schema_version": 1, "status": "UNAVAILABLE"},
+            )
             for rule_id, action, availability in (
                 (
                     _H5,
@@ -1990,7 +2111,12 @@ def _aggregate_records(program: CohortProgram) -> tuple[list[dict[str, Any]], se
                     "availability": comparator.get("availability"),
                     "outcome": outcome,
                 })
-    return records, rule_ids
+    return (
+        records,
+        rule_ids,
+        selected_opportunities,
+        attempted_counterfactual_fills,
+    )
 
 
 def finalize_program(program: CohortProgram) -> Path:
@@ -2004,7 +2130,12 @@ def finalize_program(program: CohortProgram) -> Path:
     has_unscorable = outcome_cycle_count != CYCLE_COUNT
     if replay["credits"] > MAX_PROGRAM_CREDITS and not has_unscorable:
         raise CohortRunnerError("program credit ceiling exceeded without terminal failure")
-    records, rule_ids = _aggregate_records(program)
+    (
+        records,
+        rule_ids,
+        selected_opportunities,
+        attempted_counterfactual_fills,
+    ) = _aggregate_records(program)
     results = [
         aggregate_rule(
             records,
@@ -2017,6 +2148,8 @@ def finalize_program(program: CohortProgram) -> Path:
                 and not replay["authorized_credit_ceiling_breached"]
             ),
             advance_eligible=(rule_id == _H5_PAIRED),
+            selected_opportunity_count=selected_opportunities,
+            attempted_counterfactual_fill_count=attempted_counterfactual_fills,
         )
         for rule_id in sorted(rule_ids)
     ]

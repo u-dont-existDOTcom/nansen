@@ -62,6 +62,14 @@ def _finite(value: Any, *, field: str, minimum: float | None = None) -> float:
     return number
 
 
+def _directional_flow(value: Any, *, field: str, outflow: bool) -> float:
+    number = _finite(value, field=field)
+    if (outflow and number > 0) or (not outflow and number < 0):
+        direction = "nonpositive" if outflow else "nonnegative"
+        raise CohortFeatureError(f"{field} must be finite and {direction}")
+    return number
+
+
 def flow_payload(candidate: Any, cutoff: datetime, label: str) -> dict[str, Any]:
     chain, address = _identity(candidate)
     boundary = _utc(cutoff, field="cutoff")
@@ -145,14 +153,20 @@ def validate_flow_body(
         raise CohortFeatureError("flow label must be smart_money or exchange")
     if not isinstance(body, dict) or not isinstance(body.get("data"), list):
         raise CohortFeatureError(f"{label} flow response data must be a list")
+    if len(body["data"]) < 25:
+        raise CohortFeatureError(f"{label} flow response has fewer than 25 completed rows")
+    if len(body["data"]) > 26:
+        raise CohortFeatureError(
+            f"{label} flow response must contain only the 25-hour grid and one-hour buffer"
+        )
     _validate_optional_identity(body, candidate)
     pagination = body.get("pagination")
     if (
         not isinstance(pagination, dict)
+        or type(pagination.get("page")) is not int
         or pagination.get("page") != 1
-        or isinstance(pagination.get("page"), bool)
+        or type(pagination.get("per_page")) is not int
         or pagination.get("per_page") != 1000
-        or isinstance(pagination.get("per_page"), bool)
         or pagination.get("is_last_page") is not True
     ):
         raise CohortFeatureError(f"{label} flow response must be complete page one")
@@ -170,8 +184,8 @@ def validate_flow_body(
             raise CohortFeatureError(f"{label} flow row {index} is not an hourly bucket")
         if previous_end is not None and bucket_end <= previous_end:
             raise CohortFeatureError(f"{label} flow rows are not strictly ordered")
-        if bucket_end > boundary:
-            raise CohortFeatureError(f"{label} flow row exceeds the cycle cutoff")
+        if date < boundary - timedelta(hours=26) or bucket_end > boundary:
+            raise CohortFeatureError(f"{label} flow row is outside the requested bounds")
         previous_end = bucket_end
         row = dict(source)
         row["price_usd"] = _finite(row.get("price_usd"), field="flow price_usd", minimum=0.0)
@@ -189,18 +203,26 @@ def validate_flow_body(
         ):
             raise CohortFeatureError("flow holders_count must be a nonnegative integer")
         row["holders_count"] = holders
-        for field in ("total_inflows_count", "total_outflows_count"):
-            row[field] = _finite(source.get(field), field=field, minimum=0.0)
+        row["total_inflows_count"] = _directional_flow(
+            source.get("total_inflows_count"),
+            field="total_inflows_count",
+            outflow=False,
+        )
+        row["total_outflows_count"] = _directional_flow(
+            source.get("total_outflows_count"),
+            field="total_outflows_count",
+            outflow=True,
+        )
         if label == "exchange":
             for field in _EXCHANGE_COMPONENTS:
                 if source.get(field) is not None:
-                    row[field] = _finite(source[field], field=field, minimum=0.0)
+                    row[field] = _directional_flow(
+                        source[field], field=field, outflow="outflows" in field
+                    )
         row["date"] = utc_text(date)
         row["bucket_end"] = utc_text(bucket_end)
         validated.append(row)
 
-    if len(validated) < 25:
-        raise CohortFeatureError(f"{label} flow response has fewer than 25 completed rows")
     admitted = validated[-25:]
     admitted_ends = [parse_utc(row["bucket_end"], field="bucket_end") for row in admitted]
     required = [boundary - (24 - index) * _HOUR for index in range(25)]
@@ -229,14 +251,16 @@ def validate_wbs_pages(
     for page_number, body in enumerate(pages, start=1):
         if not isinstance(body, dict) or not isinstance(body.get("data"), list):
             raise CohortFeatureError(f"WBS {side} page {page_number} data must be a list")
+        if len(body["data"]) > 1000:
+            raise CohortFeatureError(f"WBS {side} page exceeds per_page=1000")
         _validate_optional_identity(body, candidate)
         pagination = body.get("pagination")
         if (
             not isinstance(pagination, dict)
+            or type(pagination.get("page")) is not int
             or pagination.get("page") != page_number
-            or isinstance(pagination.get("page"), bool)
+            or type(pagination.get("per_page")) is not int
             or pagination.get("per_page") != 1000
-            or isinstance(pagination.get("per_page"), bool)
             or not isinstance(pagination.get("is_last_page"), bool)
         ):
             raise CohortFeatureError(f"WBS {side} page {page_number} pagination is invalid")
@@ -381,6 +405,14 @@ def h5_decision(features: dict[str, Any]) -> dict[str, Any]:
         or not isinstance(value, (int, float))
         or not math.isfinite(float(value))
     ]
+    for name in ("buyer_addresses", "seller_addresses"):
+        value = required[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 0
+        ):
+            unavailable.append(name)
     if buyer.get("available") is not True or seller.get("available") is not True:
         unavailable.append("complete_buyer_seller_pagination")
     if unavailable:

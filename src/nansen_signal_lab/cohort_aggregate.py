@@ -177,6 +177,8 @@ def aggregate_rule(
     availability_integrity_ok: bool,
     advance_eligible: bool,
     bootstrap_replicates: int = 10_000,
+    selected_opportunity_count: int | None = None,
+    attempted_counterfactual_fill_count: int | None = None,
 ) -> dict[str, Any]:
     if (
         not isinstance(terminal_cycle_count, int)
@@ -195,13 +197,37 @@ def aggregate_rule(
     if not isinstance(advance_eligible, bool):
         raise CohortAggregateError("advance_eligible must be boolean")
     rows = _validated(records, rule_id=rule_id)
+    if selected_opportunity_count is None:
+        selected_opportunity_count = len(rows)
+    if attempted_counterfactual_fill_count is None:
+        attempted_counterfactual_fill_count = sum(
+            row.get("outcome", {}).get("status") != "UNAVAILABLE" for row in rows
+        )
+    for value, label in (
+        (selected_opportunity_count, "selected_opportunity_count"),
+        (attempted_counterfactual_fill_count, "attempted_counterfactual_fill_count"),
+    ):
+        if (
+            not isinstance(value, int)
+            or isinstance(value, bool)
+            or not 0 <= value <= CYCLE_COUNT * 5
+        ):
+            raise CohortAggregateError(f"{label} is invalid")
+    if selected_opportunity_count < len(rows):
+        raise CohortAggregateError("selected opportunities are fewer than decisions")
+    if attempted_counterfactual_fill_count > selected_opportunity_count:
+        raise CohortAggregateError("counterfactual attempts exceed selected opportunities")
     signals = [row for row in rows if row["action"] == "LONG"]
-    unavailable_count = sum(row["availability"] != "AVAILABLE" for row in rows)
+    available_decisions = sum(row["availability"] == "AVAILABLE" for row in rows)
+    unavailable_count = selected_opportunity_count - available_decisions
     scored_signals = [
         row for row in signals if row["outcome"].get("status") == "SCORED"
     ]
     counterfactual_scored = [
         row for row in rows if row["outcome"].get("status") == "SCORED"
+    ]
+    completed_counterfactual_outcomes = [
+        row for row in rows if row["outcome"].get("status") != "UNAVAILABLE"
     ]
     token_counts = Counter(row["identity"] for row in scored_signals)
     week_counts = Counter(row["utc_week"] for row in scored_signals)
@@ -265,10 +291,13 @@ def aggregate_rule(
         "advance_eligible": advance_eligible,
         "selection_status": "advances" if not reasons else "does_not_advance",
         "counts": {
-            "opportunities": len(rows),
-            "available_opportunities": len(rows) - unavailable_count,
+            "opportunities": selected_opportunity_count,
+            "decision_opportunities": len(rows),
+            "available_opportunities": available_decisions,
             "unavailable_opportunities": unavailable_count,
             "strategy_signals": len(signals),
+            "attempted_counterfactual_fills": attempted_counterfactual_fill_count,
+            "completed_counterfactual_outcomes": len(completed_counterfactual_outcomes),
             "counterfactual_scored": len(counterfactual_scored),
             "filled_strategy_signals": score_count,
             "unique_filled_tokens": len(token_counts),

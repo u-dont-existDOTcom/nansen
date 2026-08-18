@@ -148,7 +148,6 @@ def test_distribution_is_reserved_before_neutral_and_solana_case_is_preserved():
     (
         lambda row: row.update(price_usd=0),
         lambda row: row.update(price_change=float("nan")),
-        lambda row: row.update(price_change=20.01),
         lambda row: row.update(volume=0),
         lambda row: row.update(liquidity=249_999),
         lambda row: row.update(market_cap_usd=999_999),
@@ -163,6 +162,26 @@ def test_ineligible_rows_are_never_selected(mutation):
     mutation(bad)
     selected = select_cohort(_body(bad, *_five_rows()), {})
     assert "BAD" not in {item.token_symbol for item in selected}
+
+
+def test_out_of_contract_price_change_is_a_provider_semantics_failure():
+    bad = _row("BAD", "0xbad", price_change=20.01, netflow=1_000_000)
+    with pytest.raises(CohortSelectionError, match="provider semantics") as captured:
+        select_cohort(_body(bad, *_five_rows()), {})
+    assert captured.value.reason_code == "provider_semantics_failure"
+
+
+@pytest.mark.parametrize("field,value", (("page", 1.0), ("per_page", 1000.0)))
+def test_pagination_integers_are_exact(field, value):
+    body = _body(*_five_rows())
+    body["pagination"][field] = value
+    with pytest.raises(CohortSelectionError):
+        select_cohort(body, {})
+
+
+def test_screener_page_cannot_exceed_declared_page_size():
+    with pytest.raises(CohortSelectionError, match="exceeds"):
+        select_cohort(_body(*(_five_rows() * 201)), {})
 
 
 def test_missing_stratum_and_duplicate_identity_fail_closed():

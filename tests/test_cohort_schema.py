@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+import src.nansen_signal_lab.cohort_schema as cohort_schema
 
 from src.nansen_signal_lab.cohort_schema import (
     CONTRACT_SOURCE_PATH,
@@ -16,6 +18,7 @@ from src.nansen_signal_lab.cohort_schema import (
     load_cohort_program,
     remaining_required_credits,
     STRATEGY_SOURCE_PATH,
+    validate_runtime_implementation,
 )
 
 
@@ -73,6 +76,8 @@ def test_init_and_load_bind_design_contract_schedule_and_funding(tmp_path):
     assert remaining_required_credits(program, 1) == 1792
     assert remaining_required_credits(program, 32) == 56
     assert load_cohort_program(root / "program.json", repo_root=repo).manifest == program.manifest
+    assert (root / "contracts/frozen-comparator-definitions.json").is_file()
+    assert (root / "contracts/protocol-implementation.json").is_file()
 
 
 def test_load_rejects_manifest_contract_and_schedule_tampering(tmp_path):
@@ -104,3 +109,23 @@ def test_init_is_offline_and_refuses_existing_or_outside_roots(tmp_path):
         initialize_cohort_program(root, **kwargs)
     with pytest.raises(CohortSchemaError, match="research/experiments"):
         initialize_cohort_program(tmp_path / "outside", **kwargs)
+
+
+def test_runtime_protocol_drift_is_detected_against_archived_source(tmp_path, monkeypatch):
+    source = Path(__file__).resolve().parents[1]
+    runtime = tmp_path / "runtime"
+    shutil.copytree(source / "src", runtime / "src")
+    shutil.copy2(source / "requirements.txt", runtime / "requirements.txt")
+    shutil.copy2(source / "nansen-lab", runtime / "nansen-lab")
+    monkeypatch.setattr(cohort_schema, "_runtime_repository", lambda: runtime)
+    repo = _repo(tmp_path)
+    program = initialize_cohort_program(
+        repo / "research/experiments/program-fixture",
+        created_at=datetime(2026, 8, 18, 12, tzinfo=timezone.utc),
+        first_cycle_at=datetime(2026, 8, 24, 12, 5, tzinfo=timezone.utc),
+        repo_root=repo,
+    )
+    selection = runtime / "src/nansen_signal_lab/cohort_selection.py"
+    selection.write_text(selection.read_text() + "\n# drift\n")
+    with pytest.raises(CohortSchemaError, match="implementation drifted"):
+        validate_runtime_implementation(program)

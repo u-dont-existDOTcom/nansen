@@ -13,6 +13,10 @@ from typing import Any
 class CohortSelectionError(ValueError):
     """Raised when a screener page cannot produce the frozen five-token cohort."""
 
+    def __init__(self, message: str, *, reason_code: str | None = None):
+        super().__init__(message)
+        self.reason_code = reason_code
+
 
 SCREENER_CHAINS = ("solana", "ethereum", "base", "bnb", "arbitrum")
 STRATA = (
@@ -135,7 +139,6 @@ def _eligible_candidate(row: Any) -> _EligibleCandidate | None:
         price is None
         or price <= 0
         or price_change is None
-        or abs(price_change) > 20
         or volume is None
         or volume <= 0
         or liquidity is None
@@ -169,17 +172,23 @@ def _complete_page_one(body: Any) -> list[Any]:
     pagination = body.get("pagination")
     if not isinstance(rows, list):
         raise CohortSelectionError("screener response data must be a list")
+    if len(rows) > 1000:
+        raise CohortSelectionError("screener response exceeds per_page=1000")
     if not isinstance(pagination, dict):
         raise CohortSelectionError("screener pagination must be an object")
     if (
-        pagination.get("page") != 1
-        or isinstance(pagination.get("page"), bool)
+        type(pagination.get("page")) is not int
+        or pagination.get("page") != 1
+        or type(pagination.get("per_page")) is not int
         or pagination.get("per_page") != 1000
-        or isinstance(pagination.get("per_page"), bool)
-        or pagination.get("is_last_page") is not True
     ):
         raise CohortSelectionError(
             "screener response must be complete page 1 with per_page=1000"
+        )
+    if pagination.get("is_last_page") is not True:
+        raise CohortSelectionError(
+            "screener response page one is not the complete universe",
+            reason_code="insufficient_universe",
         )
     return rows
 
@@ -285,6 +294,13 @@ def select_cohort(
     eligible: list[_EligibleCandidate] = []
     seen: set[tuple[str, str]] = set()
     for row in rows:
+        if isinstance(row, dict):
+            price_change = _finite_number(row.get("price_change"))
+            if price_change is not None and abs(price_change) > 20:
+                raise CohortSelectionError(
+                    "screener price_change magnitude exceeds the frozen provider semantics",
+                    reason_code="provider_semantics_failure",
+                )
         candidate = _eligible_candidate(row)
         if candidate is None:
             continue
@@ -317,7 +333,10 @@ def select_cohort(
     for stratum in STRATA[:3]:
         available = [item for item in pools[stratum] if item.identity not in used]
         if not available:
-            raise CohortSelectionError(f"screener page has no candidate for {stratum}")
+            raise CohortSelectionError(
+                f"screener page has no candidate for {stratum}",
+                reason_code="insufficient_strata",
+            )
         candidate = min(available, key=lambda item: _signal_key(item, counts))
         chosen[stratum] = candidate
         used.add(candidate.identity)
@@ -330,7 +349,10 @@ def select_cohort(
         if item.identity not in used and item.netflow_usd < 0
     ]
     if not distribution:
-        raise CohortSelectionError("screener page has no candidate for distribution_control")
+        raise CohortSelectionError(
+            "screener page has no candidate for distribution_control",
+            reason_code="insufficient_strata",
+        )
     distribution_candidate = min(
         distribution, key=lambda item: _distribution_key(item, counts)
     )
@@ -339,7 +361,10 @@ def select_cohort(
 
     neutral = [item for item in eligible if item.identity not in used]
     if not neutral:
-        raise CohortSelectionError("screener page has no candidate for neutral_control")
+        raise CohortSelectionError(
+            "screener page has no candidate for neutral_control",
+            reason_code="insufficient_strata",
+        )
     chosen["neutral_control"] = min(
         neutral, key=lambda item: _neutral_key(item, counts)
     )

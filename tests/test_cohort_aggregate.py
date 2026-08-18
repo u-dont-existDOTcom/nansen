@@ -147,3 +147,27 @@ def test_unavailable_decision_cannot_be_relabelled_as_an_abstention_or_ignored()
     assert result["counts"]["unavailable_opportunities"] == 1
     assert "one_or_more_rule_decisions_unavailable" in result["gate_reasons"]
     assert result["selection_status"] == "does_not_advance"
+
+
+def test_reached_unscorable_evidence_keeps_selection_and_attempt_counts():
+    rows = _records(long_count=5)[:5]
+    for row in rows:
+        row["outcome"] = {"status": "UNAVAILABLE"}
+    result = aggregate_rule(
+        rows,
+        rule_id=RULE,
+        program_id="fixture-program",
+        terminal_cycle_count=32,
+        outcome_cycle_count=31,
+        availability_integrity_ok=False,
+        advance_eligible=True,
+        bootstrap_replicates=10,
+        selected_opportunity_count=160,
+        attempted_counterfactual_fill_count=1,
+    )
+    assert result["counts"]["opportunities"] == 160
+    assert result["counts"]["decision_opportunities"] == 5
+    assert result["counts"]["strategy_signals"] == 5
+    assert result["counts"]["attempted_counterfactual_fills"] == 1
+    assert result["counts"]["completed_counterfactual_outcomes"] == 0
+    assert result["counts"]["unavailable_opportunities"] == 155

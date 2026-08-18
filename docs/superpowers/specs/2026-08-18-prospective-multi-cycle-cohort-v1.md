@@ -1,9 +1,10 @@
 # Prospective multi-cycle cohort v1
 
 Status: offline implementation contract. No provider access is authorized by
-this document. A live program may be initialized only after this design and
-its implementation are committed and a fresh zero-credit account preflight
-proves the full remaining program ceiling is funded.
+this document. Offline schedule initialization does not query the provider. A
+live cycle may begin only after this design and its implementation are
+committed, the operator has funded the full remaining ceiling, and that cycle's
+fresh zero-credit account preflight proves the funding before any billable call.
 
 ## Objective and estimand
 
@@ -128,10 +129,13 @@ For every selected token, collect and archive:
   an abstention or zero breadth.
 
 Flow validation requires exact identity, complete pagination, positive price,
-nonnegative holdings/value and counts, valid holder count, strict hourly
-ordering, and `bucket_end <= cutoff`. Exchange DEX/CEX component fields are
-preserved. Breadth validation requires exact pagination, unique normalized
-addresses, and finite nonnegative directional volumes.
+nonnegative holdings/value and holder count, strict hourly ordering, and every
+row within the requested 26-hour bound. The directional provider fields are
+signed: `total_inflows_count` and DEX/CEX inflow components must be finite and
+nonnegative, while `total_outflows_count` and DEX/CEX outflow components must
+be finite and nonpositive. This matches the archived provider evidence rather
+than erasing its outflow sign. Breadth validation requires exact pagination,
+unique normalized addresses, and finite nonnegative directional volumes.
 
 The following decisions are sealed before the entry window:
 
@@ -157,8 +161,9 @@ decision:
 - One five-minute OHLCV request spanning the exact closed grid from
   `decision t0` through the exit-window end. `truncated=false`, exact token
   identity and timeframe, contiguous closed candles, positive OHLC, and
-  nonnegative volume are required. The pinned object-valued market-cap candle
-  is validated when present.
+  nonnegative volume are required. `volume_usd` and the pinned object-valued
+  market-cap candle are validated when present but are not fabricated when the
+  response omits them.
 
 The entry fill consumes chronological BUY liquidity up to the frozen notional;
 the exit consumes chronological SELL liquidity for the acquired token amount.
@@ -223,3 +228,11 @@ never retransmits an ambiguous request.
 
 No GPT/OpenAI call participates in selection or decisions. The bottleneck is
 point-in-time data and execution evidence, not model deliberation.
+
+Initialization also archives a self-contained comparator-definition document
+derived from the exact frozen strategy manifest and an exact-byte manifest plus
+copies of every runtime protocol source file plus exact Python and dependency
+versions. Before every provider call and every replay, the runtime source set,
+hashes, and dependency environment must still equal that archive. Any drift
+pauses execution before provider access; it cannot silently change the holdout
+between cycles.

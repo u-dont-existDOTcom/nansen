@@ -151,13 +151,15 @@ def validate_trade_pages(
     for page_number, body in enumerate(pages, start=1):
         if not isinstance(body, dict) or not isinstance(body.get("data"), list):
             raise CohortExecutionError(f"DEX {side} page {page_number} data must be a list")
+        if len(body["data"]) > 1000:
+            raise CohortExecutionError(f"DEX {side} page exceeds per_page=1000")
         pagination = body.get("pagination")
         if (
             not isinstance(pagination, dict)
+            or type(pagination.get("page")) is not int
             or pagination.get("page") != page_number
-            or isinstance(pagination.get("page"), bool)
+            or type(pagination.get("per_page")) is not int
             or pagination.get("per_page") != 1000
-            or isinstance(pagination.get("per_page"), bool)
             or not isinstance(pagination.get("is_last_page"), bool)
         ):
             raise CohortExecutionError(f"DEX {side} pagination is invalid")
@@ -350,8 +352,12 @@ def validate_ohlcv(
         for field in ("open", "high", "low", "close"):
             row[field] = _finite(source.get(field), field=f"OHLCV {field}", positive=True)
         row["volume"] = _finite(source.get("volume"), field="OHLCV volume")
-        row["volume_usd"] = _finite(source.get("volume_usd"), field="OHLCV volume_usd")
-        row["market_cap"] = _market_cap(source.get("market_cap"))
+        if source.get("volume_usd") is not None:
+            row["volume_usd"] = _finite(
+                source.get("volume_usd"), field="OHLCV volume_usd"
+            )
+        if source.get("market_cap") is not None:
+            row["market_cap"] = _market_cap(source.get("market_cap"))
         if row["high"] < max(row["open"], row["close"], row["low"]):
             raise CohortExecutionError("OHLCV high is inconsistent")
         if row["low"] > min(row["open"], row["close"], row["high"]):

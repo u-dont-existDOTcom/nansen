@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
+import platform
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .artifacts import write_bytes_once, write_json_once
+from .artifacts import canonical_json_bytes, write_bytes_once, write_json_once
 
 
 class CohortSchemaError(RuntimeError):
@@ -36,6 +38,8 @@ STRATEGY_SOURCE_PATH = (
 EXPECTED_STRATEGY_SHA256 = (
     "5d5859be0c03bd1f786436ad199aac48de9c6688883392836796c0f8e3ccf6d5"
 )
+COMPARATOR_PATH = "contracts/frozen-comparator-definitions.json"
+IMPLEMENTATION_PATH = "contracts/protocol-implementation.json"
 WBS_LABELS = ("Fund", "Smart Trader", "30D Smart Trader")
 PRIMARY_RULE_ID = "buyer-breadth-exchange-comovement-v1+distribution-veto"
 STRATA = (
@@ -166,6 +170,8 @@ def _program_document(
     design_sha256: str,
     contract_sha256: str,
     strategy_sha256: str,
+    comparator_sha256: str,
+    implementation_sha256: str,
 ) -> dict[str, Any]:
     return {
         "schema_version": 1,
@@ -179,6 +185,10 @@ def _program_document(
         "contract_sha256": contract_sha256,
         "strategy_path": "contracts/frozen-strategy-manifest.json",
         "strategy_sha256": strategy_sha256,
+        "comparator_path": COMPARATOR_PATH,
+        "comparator_sha256": comparator_sha256,
+        "implementation_path": IMPLEMENTATION_PATH,
+        "implementation_sha256": implementation_sha256,
         "schedule": list(build_schedule(first_cycle_at)),
         "selection": {
             "panel_size": PANEL_SIZE,
@@ -218,6 +228,152 @@ def _program_document(
             "all_cycles_must_be_outcome_sealed": True,
         },
     }
+
+
+def _comparator_document(strategy_bytes: bytes) -> dict[str, Any]:
+    try:
+        strategy = json.loads(strategy_bytes)
+    except json.JSONDecodeError as exc:  # pragma: no cover - pinned bytes are valid JSON
+        raise CohortSchemaError("frozen strategy manifest is not valid JSON") from exc
+    if (
+        not isinstance(strategy, dict)
+        or not isinstance(strategy.get("theories"), list)
+        or len(strategy["theories"]) != 6
+        or not isinstance(strategy.get("blocked_theories"), list)
+    ):
+        raise CohortSchemaError("frozen strategy definitions are unavailable")
+    return {
+        "schema_version": 1,
+        "source_manifest_sha256": EXPECTED_STRATEGY_SHA256,
+        "theories": strategy["theories"],
+        "blocked_theories": strategy["blocked_theories"],
+    }
+
+
+def _runtime_repository() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _runtime_implementation_files(repository: Path | None = None) -> tuple[Path, ...]:
+    root = _runtime_repository() if repository is None else Path(repository).resolve()
+    package = root / "src/nansen_signal_lab"
+    files = sorted(package.rglob("*.py")) if package.is_dir() else []
+    for relative in ("requirements.txt", "nansen-lab"):
+        path = root / relative
+        if path.is_file() and not path.is_symlink():
+            files.append(path)
+    if not files or any(path.is_symlink() or not path.is_file() for path in files):
+        raise CohortSchemaError("protocol implementation source set is unavailable")
+    return tuple(sorted(set(files)))
+
+
+def _implementation_document(repository: Path | None = None) -> dict[str, Any]:
+    root = _runtime_repository() if repository is None else Path(repository).resolve()
+    records = []
+    for path in _runtime_implementation_files(root):
+        records.append(
+            {
+                "path": path.relative_to(root).as_posix(),
+                "sha256": _sha256(path.read_bytes()),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "binding": "exact-runtime-source-v1",
+        "files": records,
+        "runtime": _runtime_environment(),
+    }
+
+
+def _runtime_environment() -> dict[str, Any]:
+    packages = {}
+    for distribution in ("httpx", "python-dotenv", "pandas"):
+        try:
+            packages[distribution] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError as exc:
+            raise CohortSchemaError(
+                f"required runtime distribution is unavailable: {distribution}"
+            ) from exc
+    return {
+        "python_implementation": platform.python_implementation(),
+        "python_version": platform.python_version(),
+        "packages": packages,
+    }
+
+
+def _load_implementation_document(program: CohortProgram) -> dict[str, Any]:
+    path = _confined(
+        program.root,
+        program.manifest["implementation_path"],
+        field="implementation_path",
+    )
+    _regular_no_symlink(path, label="protocol implementation manifest")
+    raw = path.read_bytes()
+    if _sha256(raw) != program.manifest["implementation_sha256"]:
+        raise CohortSchemaError("protocol implementation manifest hash differs")
+    try:
+        document = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CohortSchemaError("protocol implementation manifest is invalid") from exc
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"schema_version", "binding", "files", "runtime"}
+        or document.get("schema_version") != 1
+        or document.get("binding") != "exact-runtime-source-v1"
+        or not isinstance(document.get("files"), list)
+        or not document["files"]
+    ):
+        raise CohortSchemaError("protocol implementation manifest schema differs")
+    return document
+
+
+def validate_runtime_implementation(program: CohortProgram) -> None:
+    """Refuse protocol execution or replay under code different from init bytes."""
+
+    document = _load_implementation_document(program)
+    if document["runtime"] != _runtime_environment():
+        raise CohortSchemaError("runtime protocol dependency environment drifted")
+    runtime_root = _runtime_repository()
+    current_paths = {
+        path.relative_to(runtime_root).as_posix()
+        for path in _runtime_implementation_files(runtime_root)
+    }
+    archived_paths: set[str] = set()
+    expected_archived_files: set[Path] = set()
+    for record in document["files"]:
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"path", "sha256"}
+        ):
+            raise CohortSchemaError("protocol implementation file record differs")
+        relative = _strict_relative(record["path"], field="implementation file path")
+        relative_text = relative.as_posix()
+        if relative_text in archived_paths:
+            raise CohortSchemaError("protocol implementation file path is duplicated")
+        archived_paths.add(relative_text)
+        archived = _confined(
+            program.root,
+            f"contracts/implementation/{relative_text}",
+            field="archived implementation file",
+        )
+        expected_archived_files.add(archived.absolute())
+        _regular_no_symlink(archived, label="archived implementation file")
+        if _sha256(archived.read_bytes()) != record["sha256"]:
+            raise CohortSchemaError("archived protocol implementation bytes differ")
+        live = runtime_root.joinpath(*relative.parts)
+        _regular_no_symlink(live, label="runtime protocol implementation file")
+        if _sha256(live.read_bytes()) != record["sha256"]:
+            raise CohortSchemaError(
+                f"runtime protocol implementation drifted: {relative_text}"
+            )
+    if archived_paths != current_paths:
+        raise CohortSchemaError("runtime protocol implementation source set drifted")
+    archive_root = program.root / "contracts/implementation"
+    actual_archived_files = {
+        path.absolute() for path in archive_root.rglob("*") if path.is_file()
+    }
+    if actual_archived_files != expected_archived_files:
+        raise CohortSchemaError("archived protocol implementation source set differs")
 
 
 def initialize_cohort_program(
@@ -260,6 +416,11 @@ def initialize_cohort_program(
     strategy_hash = _sha256(strategy_bytes)
     if strategy_hash != EXPECTED_STRATEGY_SHA256:
         raise CohortSchemaError("frozen strategy manifest hash differs")
+    comparator_document = _comparator_document(strategy_bytes)
+    comparator_bytes = canonical_json_bytes(comparator_document)
+    implementation_root = _runtime_repository()
+    implementation_document = _implementation_document(implementation_root)
+    implementation_bytes = canonical_json_bytes(implementation_document)
 
     created = _utc(created_at, field="created_at")
     first = _utc(first_cycle_at, field="first_cycle_at")
@@ -272,6 +433,8 @@ def initialize_cohort_program(
         design_sha256=_sha256(design_bytes),
         contract_sha256=contract_hash,
         strategy_sha256=strategy_hash,
+        comparator_sha256=_sha256(comparator_bytes),
+        implementation_sha256=_sha256(implementation_bytes),
     )
 
     root.mkdir(parents=True)
@@ -280,6 +443,15 @@ def initialize_cohort_program(
         write_bytes_once(
             root / "contracts" / "frozen-strategy-manifest.json", strategy_bytes
         )
+        write_bytes_once(root / COMPARATOR_PATH, comparator_bytes)
+        write_bytes_once(root / IMPLEMENTATION_PATH, implementation_bytes)
+        for source in _runtime_implementation_files(implementation_root):
+            write_bytes_once(
+                root
+                / "contracts/implementation"
+                / source.relative_to(implementation_root),
+                source.read_bytes(),
+            )
         write_json_once(root / "program.json", document)
     except BaseException:
         # Initialization is the only point at which this directory can be
@@ -289,9 +461,29 @@ def initialize_cohort_program(
             root / "program.json",
             root / "contracts" / "nansen-openapi.json",
             root / "contracts" / "frozen-strategy-manifest.json",
+            root / COMPARATOR_PATH,
+            root / IMPLEMENTATION_PATH,
         ):
             if path.is_file() and not path.is_symlink():
                 path.unlink()
+        implementation_root_path = root / "contracts/implementation"
+        if implementation_root_path.exists() and not implementation_root_path.is_symlink():
+            for path in sorted(
+                implementation_root_path.rglob("*"),
+                key=lambda item: len(item.parts),
+                reverse=True,
+            ):
+                if path.is_file() and not path.is_symlink():
+                    path.unlink()
+                elif path.is_dir() and not path.is_symlink():
+                    try:
+                        path.rmdir()
+                    except OSError:
+                        pass
+            try:
+                implementation_root_path.rmdir()
+            except OSError:
+                pass
         for directory in (root / "contracts", root):
             try:
                 directory.rmdir()
@@ -328,7 +520,8 @@ def load_cohort_program(
     expected_keys = {
         "schema_version", "program_version", "program_id", "created_at", "stage",
         "design_path", "design_sha256", "contract_path", "contract_sha256",
-        "strategy_path", "strategy_sha256",
+        "strategy_path", "strategy_sha256", "comparator_path", "comparator_sha256",
+        "implementation_path", "implementation_sha256",
         "schedule", "selection", "strategies", "execution", "budget",
         "advancement_gates",
     }
@@ -345,6 +538,8 @@ def load_cohort_program(
     schedule = document.get("schedule")
     if not isinstance(schedule, list) or len(schedule) != CYCLE_COUNT:
         raise CohortSchemaError("cohort schedule must contain exactly 32 cycles")
+    if any(not isinstance(item, dict) for item in schedule):
+        raise CohortSchemaError("cohort schedule entries must be objects")
     first = parse_utc(schedule[0].get("scheduled_at"), field="first scheduled_at")
     if schedule != list(build_schedule(first)):
         raise CohortSchemaError("cohort schedule differs from the fixed 44-hour cadence")
@@ -359,6 +554,8 @@ def load_cohort_program(
         design_sha256=document.get("design_sha256"),
         contract_sha256=document.get("contract_sha256"),
         strategy_sha256=document.get("strategy_sha256"),
+        comparator_sha256=document.get("comparator_sha256"),
+        implementation_sha256=document.get("implementation_sha256"),
     )
     if document != expected:
         raise CohortSchemaError("cohort program configuration differs from v1")
@@ -382,7 +579,17 @@ def load_cohort_program(
         or document["strategy_sha256"] != EXPECTED_STRATEGY_SHA256
     ):
         raise CohortSchemaError("frozen strategy manifest hash differs")
-    return CohortProgram(root=root, manifest_path=path, manifest=document)
+    comparator_path = _confined(root, document["comparator_path"], field="comparator_path")
+    _regular_no_symlink(comparator_path, label="frozen comparator definitions")
+    expected_comparator = canonical_json_bytes(_comparator_document(strategy_path.read_bytes()))
+    if (
+        comparator_path.read_bytes() != expected_comparator
+        or _sha256(expected_comparator) != document["comparator_sha256"]
+    ):
+        raise CohortSchemaError("frozen comparator definitions differ")
+    program = CohortProgram(root=root, manifest_path=path, manifest=document)
+    _load_implementation_document(program)
+    return program
 
 
 def remaining_required_credits(program: CohortProgram, cycle_index: int) -> int:

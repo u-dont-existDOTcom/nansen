@@ -109,8 +109,9 @@ Only the two per-cycle commands can access Nansen:
 # Offline budget calculation: 1,792 credits maximum, 1,824 authenticated attempts.
 ./nansen-lab cohort-plan
 
-# Run only after the implementation is committed and a fresh account preflight
-# can prove the full remaining ceiling. The first time must be HH:05:00 UTC.
+# Initialize only after the implementation is committed and the operator has
+# funded the full ceiling. The first live cycle's zero-credit preflight proves
+# all 1,792 credits before its first billable call. The first time is HH:05 UTC.
 ./nansen-lab cohort-init \
   --experiment-dir research/experiments/PROSPECTIVE_COHORT_ID \
   --first-cycle-at 2026-08-24T12:05:00Z
@@ -134,6 +135,12 @@ counterfactual fills for `ABSTAIN` never count toward the 100 strategy-fill
 advancement gate. A decision seal must precede its first entry boundary and
 land within 45 minutes of the scheduled start, so slow or stale recovery cannot
 turn old features into a backtest.
+
+Initialization archives self-contained frozen comparator definitions, exact
+copies plus hashes of the protocol runtime, and exact Python/dependency
+versions. Every live command and offline replay refuses environment drift, so
+selection, decisions, execution scoring, and aggregation cannot change
+outcome-adaptively during the eight-week holdout.
 
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.
 

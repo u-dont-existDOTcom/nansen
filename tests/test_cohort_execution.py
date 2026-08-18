@@ -163,6 +163,27 @@ def test_wrong_identity_and_ambiguous_multi_leg_rows_fail_closed():
         )
 
 
+def test_dex_page_cannot_exceed_declared_page_size():
+    windows = execution_windows(CUTOFF)
+    rows = [
+        _trade(
+            "BUY",
+            windows["entry_start"] + timedelta(microseconds=index),
+            f"0x{index:04x}",
+            amount=0.01,
+        )
+        for index in range(1001)
+    ]
+    with pytest.raises(CohortExecutionError, match="exceeds"):
+        build_entry_fill(
+            [_page(*rows)],
+            candidate=CANDIDATE,
+            notional_usd=100,
+            start=windows["entry_start"],
+            end=windows["entry_end"],
+        )
+
+
 def test_ohlcv_requires_and_validates_exactly_one_inclusive_end_candle():
     windows = execution_windows(CUTOFF)
     body = _ohlcv(windows["ohlcv_start"], windows["ohlcv_end"])
@@ -189,3 +210,20 @@ def test_ohlcv_requires_and_validates_exactly_one_inclusive_end_candle():
             end=windows["ohlcv_end"],
             retrieved_at=windows["earliest_settlement"],
         )
+
+
+def test_ohlcv_optional_volume_usd_and_market_cap_are_not_required():
+    windows = execution_windows(CUTOFF)
+    body = _ohlcv(windows["ohlcv_start"], windows["ohlcv_end"])
+    for row in body["data"]:
+        row.pop("volume_usd")
+        row.pop("market_cap")
+    rows = validate_ohlcv(
+        body,
+        candidate=CANDIDATE,
+        start=windows["ohlcv_start"],
+        end=windows["ohlcv_end"],
+        retrieved_at=windows["earliest_settlement"],
+    )
+    assert "volume_usd" not in rows[0]
+    assert "market_cap" not in rows[0]

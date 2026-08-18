@@ -33,7 +33,7 @@ def _flow_body(*, change: float = 0.01, final=True):
             "value_usd": amount,
             "holders_count": 10 + index,
             "total_inflows_count": 1,
-            "total_outflows_count": 1,
+            "total_outflows_count": -1,
         })
     return {
         "data": rows,
@@ -92,6 +92,36 @@ def test_flow_admits_exact_trailing_25_rows_and_builds_h5_long():
     assert decision["action"] == "LONG"
 
 
+def test_exchange_outflows_preserve_the_provider_signed_direction():
+    body = _flow_body(change=-0.01)
+    for row in body["data"]:
+        row.update(
+            total_outflows_count=-2.0,
+            total_inflows_dex=3.0,
+            total_outflows_dex=-1.0,
+            total_inflows_cex=4.0,
+            total_outflows_cex=-1.0,
+        )
+    rows = validate_flow_body(
+        body, candidate=CANDIDATE, label="exchange", cutoff=CUTOFF
+    )
+    assert rows[-1]["total_outflows_count"] == -2.0
+    assert rows[-1]["total_outflows_dex"] == -1.0
+
+
+def test_flow_rejects_a_leading_row_outside_the_requested_buffer():
+    body = _flow_body()
+    stale = dict(body["data"][0])
+    stale_end = CUTOFF.replace(minute=0) - timedelta(hours=26)
+    stale["date"] = (stale_end - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+    stale["bucket_end"] = stale_end.isoformat().replace("+00:00", "Z")
+    body["data"].insert(0, stale)
+    with pytest.raises(CohortFeatureError, match="one-hour buffer"):
+        validate_flow_body(
+            body, candidate=CANDIDATE, label="smart_money", cutoff=CUTOFF
+        )
+
+
 def test_incomplete_second_wbs_page_is_unavailable_not_zero():
     evidence = validate_wbs_pages(
         [_wbs("BUY", final=False), _wbs("BUY", page=2, final=False, start=2)],
@@ -133,6 +163,15 @@ def test_boolean_pagination_page_is_not_integer_page_one():
         )
 
 
+def test_float_pagination_values_are_not_exact_integers():
+    body = _flow_body()
+    body["pagination"]["per_page"] = 1000.0
+    with pytest.raises(CohortFeatureError, match="complete page one"):
+        validate_flow_body(
+            body, candidate=CANDIDATE, label="smart_money", cutoff=CUTOFF
+        )
+
+
 def test_duplicate_wbs_addresses_fail_closed():
     page = _wbs("BUY", count=2)
     page["data"][1]["address"] = page["data"][0]["address"]
@@ -144,4 +183,10 @@ def test_missing_directional_breadth_volume_is_not_coerced_to_zero():
     page = _wbs("BUY", count=1)
     page["data"][0].pop("bought_volume_usd")
     with pytest.raises(CohortFeatureError, match="missing required"):
+        validate_wbs_pages([page], candidate=CANDIDATE, side="BUY")
+
+
+def test_wbs_page_cannot_exceed_declared_page_size():
+    page = _wbs("BUY", count=1001)
+    with pytest.raises(CohortFeatureError, match="exceeds"):
         validate_wbs_pages([page], candidate=CANDIDATE, side="BUY")
