@@ -67,9 +67,11 @@ class PilotError(RuntimeError):
 _SOURCE_PATH = "../2026-08-17-paper-strategy-feasibility/manifest.json"
 _DESIGN_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md"
 _DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md"
+_DESIGN_V3_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md"
 _PROTOCOL_DESIGNS = {
     "strict-v1": _DESIGN_PATH,
     "account-baseline-v2": _DESIGN_V2_PATH,
+    "completed-flow-v3": _DESIGN_V3_PATH,
 }
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _EVIDENCE_TIMESTAMP_FIELDS = {
@@ -1135,9 +1137,10 @@ def start_pilot(
     matched_openapi_sha256 = _sha256_bytes(openapi_raw)
     account_baseline_version = (
         "account-baseline-v2"
-        if current.manifest["design_path"] == _DESIGN_V2_PATH
+        if current.manifest["design_path"] in {_DESIGN_V2_PATH, _DESIGN_V3_PATH}
         else None
     )
+    completed_flow_range = current.manifest["design_path"] == _DESIGN_V3_PATH
 
     writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
     try:
@@ -1265,7 +1268,12 @@ def start_pilot(
 
         responses: list[NansenEvidenceResponse] = []
         for index, (method, endpoint, payload) in enumerate(
-            predecision_requests(candidate, available_at), start=1
+            predecision_requests(
+                candidate,
+                available_at,
+                completed_flow_range=completed_flow_range,
+            ),
+            start=1,
         ):
             label = (
                 payload.get("label")

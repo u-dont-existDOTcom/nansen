@@ -25,6 +25,7 @@ def _repo(tmp_path: Path) -> Path:
     for relative in (
         "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md",
         "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md",
+        "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md",
         "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
     ):
         target = repo / relative
@@ -443,6 +444,65 @@ def test_v2_fallback_recovers_archived_response_without_retransmission(
     assert len([call for call in nansen.calls if call[0] != "OPENAPI"]) == 1
     totals = BudgetGuard(bundle.root).replay()
     assert (totals.calls, totals.credits, totals.provider_remaining) == (0, 0, 10)
+
+
+def test_v3_runner_uses_completed_hour_range_for_both_flow_labels(tmp_path):
+    from dataclasses import replace
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot, start_pilot
+
+    class V3Nansen(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            if endpoint != "account":
+                return response
+            return replace(
+                response,
+                response_headers={
+                    "X-Request-Id": caller_request_id,
+                    "X-Nansen-Credits-Cost": "0",
+                },
+                credit_used=None,
+                credit_remaining=None,
+            )
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/completed-flow-v3-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+        protocol_version="completed-flow-v3",
+    )
+    nansen = V3Nansen()
+    decision = start_pilot(
+        bundle,
+        nansen=nansen,
+        openai=FakeOpenAI(),
+        clock=lambda: datetime(
+            2026, 8, 17, 10, 37, 42, 123456, tzinfo=timezone.utc
+        ),
+        sleep=lambda _seconds: None,
+    )
+
+    assert decision.manifest["stage"] == "decision_sealed"
+    assert decision.manifest["design_path"].endswith("completed-flow-v3.md")
+    assert (decision.root / "derived/account-baseline.json").is_file()
+    flow_payloads = [
+        payload for method, endpoint, payload in nansen.calls
+        if endpoint == "tgm/flows"
+    ]
+    assert [payload["label"] for payload in flow_payloads] == [
+        "smart_money", "exchange"
+    ]
+    assert [payload["date"] for payload in flow_payloads] == [
+        {
+            "from": "2026-08-16T09:00:00Z",
+            "to": "2026-08-17T09:59:59.999999Z",
+        },
+        {
+            "from": "2026-08-16T09:00:00Z",
+            "to": "2026-08-17T09:59:59.999999Z",
+        },
+    ]
 
 
 def test_full_fake_lifecycle_uses_exact_billable_calls_and_replays_offline(tmp_path):

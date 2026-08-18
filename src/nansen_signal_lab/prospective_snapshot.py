@@ -246,10 +246,27 @@ def freeze_selection(
 
 
 def predecision_requests(
-    candidate: Candidate, available_at: datetime
+    candidate: Candidate,
+    available_at: datetime,
+    *,
+    completed_flow_range: bool = False,
 ) -> tuple[tuple[str, str, dict[str, Any]], ...]:
     available = _utc(available_at, field="available_at")
-    date = {"from": _utc_text(available - timedelta(hours=25)), "to": _utc_text(available)}
+    if not isinstance(completed_flow_range, bool):
+        raise SnapshotError("completed_flow_range must be a boolean")
+    if completed_flow_range:
+        completed_boundary = available.replace(
+            minute=0, second=0, microsecond=0
+        )
+        date = {
+            "from": _utc_text(completed_boundary - timedelta(hours=25)),
+            "to": _utc_text(completed_boundary - timedelta(microseconds=1)),
+        }
+    else:
+        date = {
+            "from": _utc_text(available - timedelta(hours=25)),
+            "to": _utc_text(available),
+        }
     base = {"chain": candidate.chain, "token_address": candidate.token_address}
     def flow_request(label: str) -> dict[str, Any]:
         return {

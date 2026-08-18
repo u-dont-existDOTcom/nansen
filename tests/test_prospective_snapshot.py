@@ -191,6 +191,27 @@ def test_predecision_requests_are_exact_relative_contract_triples():
     )
 
 
+def test_completed_flow_requests_exclude_non_aligned_current_hour():
+    snapshot = _snapshot_module()
+    candidate = snapshot.Candidate("solana", "So111", "SOL", 250_000, _candidate_row())
+    available_at = datetime(
+        2026, 8, 17, 10, 37, 42, 123456, tzinfo=timezone.utc
+    )
+
+    requests = snapshot.predecision_requests(
+        candidate, available_at, completed_flow_range=True
+    )
+
+    expected_date = {
+        "from": "2026-08-16T09:00:00Z",
+        "to": "2026-08-17T09:59:59.999999Z",
+    }
+    assert requests[2][2]["date"] == expected_date
+    assert requests[3][2]["date"] == expected_date
+    assert requests[0][2]["timeframe"] == "1d"
+    assert requests[1][2]["timeframe"] == "1d"
+
+
 def test_contract_relative_paths_are_not_double_prefixed(tmp_path, monkeypatch):
     snapshot = _snapshot_module()
     requests = []
