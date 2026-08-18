@@ -470,6 +470,14 @@ def test_pilot_parser_has_fixed_budget_and_no_override_flags():
     ])
     assert successor.protocol_version == "citation-enum-v6"
     assert successor.source_manifest == "source-v5/manifest.json"
+    v7 = parser.parse_args([
+        "pilot-init",
+        "--experiment-dir", "experiment-v7",
+        "--protocol-version", "pass2-budget-v7",
+        "--source-manifest", "source-v6/manifest.json",
+    ])
+    assert v7.protocol_version == "pass2-budget-v7"
+    assert v7.source_manifest == "source-v6/manifest.json"
     args = parser.parse_args([
         "pilot-start",
         "--manifest", "experiment/manifest.json",

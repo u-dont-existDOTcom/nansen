@@ -533,6 +533,32 @@ def test_pass2_exact_citation_schema_reuses_same_snapshot_path_enum(tmp_path):
     assert schema["properties"]["evidence_against"]["items"]["enum"] == enum
 
 
+def test_pass2_archives_and_transmits_the_preregistered_output_allowance(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import run_pass1, run_pass2
+
+    snapshot = _snapshot(tmp_path / "snapshot.json")
+    writer = _writer(tmp_path)
+    pass1 = run_pass1(FakeClient(_response(_pass1_value())), snapshot, writer)
+    client = FakeClient(
+        _response(_pass2_value(pass1.snapshot_sha256, pass1.response_sha256))
+    )
+
+    run_pass2(
+        client,
+        snapshot,
+        pass1,
+        _theories(),
+        writer,
+        max_output_tokens=25_000,
+    )
+
+    assert client.calls[0]["max_output_tokens"] == 25_000
+    archived = json.loads(
+        (tmp_path / "model/pass-2/attempt-1-request.json").read_text()
+    )
+    assert archived["request_body"]["max_output_tokens"] == 25_000
+
+
 def test_pass2_rejects_snapshot_or_pass1_hash_mutation_and_record_coverage(tmp_path):
     from src.nansen_signal_lab.gpt_protocol import GPTProtocolError, run_pass1, run_pass2
 

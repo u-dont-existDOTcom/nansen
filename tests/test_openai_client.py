@@ -136,6 +136,50 @@ def test_openai_transport_uses_exact_model_and_responses_contract():
     assert result.raw_body.startswith(b'{"id": "resp_1"')
 
 
+def test_openai_transport_accepts_a_bounded_protocol_output_allowance():
+    from src.nansen_signal_lab.openai_client import OpenAIClient
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={
+            "id": "resp_budget",
+            "model": "gpt-5.6-sol",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{"type": "output_text", "text": "{}"}],
+            }],
+        })
+
+    client = OpenAIClient(
+        api_key="sk-test-secret-1234567890",
+        transport=httpx.MockTransport(handler),
+        now=_clock,
+    )
+    client.create_structured(
+        model_id="gpt-5.6-sol",
+        instructions="Return one object.",
+        input_json={},
+        schema_name="pass_2_budget",
+        schema={"type": "object"},
+        max_output_tokens=25_000,
+    )
+
+    assert json.loads(requests[0].content)["max_output_tokens"] == 25_000
+
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        client.create_structured(
+            model_id="gpt-5.6-sol",
+            instructions="Return one object.",
+            input_json={},
+            schema_name="invalid_budget",
+            schema={"type": "object"},
+            max_output_tokens=128_001,
+        )
+
+
 def test_openai_transport_rejects_model_mismatch_and_redacts_failures():
     from src.nansen_signal_lab.openai_client import OpenAIClient, OpenAIError
 

@@ -29,6 +29,7 @@ def _repo(tmp_path: Path) -> Path:
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-citation-enum-v6.md",
+        "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-pass2-budget-v7.md",
         "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
     ):
         target = repo / relative
@@ -824,6 +825,73 @@ def test_v6_reuses_exact_v5_snapshot_and_sends_only_enumerated_citations(
             nansen=NeverNansen(),
             clock=lambda: datetime(2026, 8, 18, 8, tzinfo=timezone.utc),
         )
+
+
+def test_v7_changes_only_pass2_output_allowance_and_reuses_v6_snapshot(tmp_path):
+    from src.nansen_signal_lab.budget import BudgetGuard
+    from src.nansen_signal_lab.prospective_runner import (
+        check_pilot,
+        initialize_model_successor,
+        start_pilot,
+    )
+
+    repo = _repo(tmp_path)
+    source_name = "2026-08-18-gpt-prospective-pilot-citation-enum-v6"
+    shutil.copy2(
+        ROOT / "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
+        repo / "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
+    )
+    shutil.copytree(
+        ROOT / "research/experiments" / source_name,
+        repo / "research/experiments" / source_name,
+    )
+    source_manifest = repo / "research/experiments" / source_name / "manifest.json"
+    source_snapshot = source_manifest.parent / "normalized/snapshot.json"
+    successor = initialize_model_successor(
+        repo / "research/experiments/pass2-budget-v7",
+        source_manifest=source_manifest,
+        created_at=datetime(2026, 8, 18, 5, tzinfo=timezone.utc),
+        protocol_version="pass2-budget-v7",
+    )
+
+    assert successor.manifest["stage"] == "snapshot_collected"
+    assert successor.manifest["design_path"].endswith("pass2-budget-v7.md")
+    assert (successor.root / "normalized/snapshot.json").read_bytes() == source_snapshot.read_bytes()
+    preregistration = json.loads((successor.root / "preregistration.json").read_text())
+    assert preregistration["model"]["max_output_tokens"] == {
+        "pass_1": 4000,
+        "pass_2": 25_000,
+    }
+
+    class NeverNansen:
+        def __getattr__(self, name):
+            raise AssertionError(f"Nansen must not be touched: {name}")
+
+    class BudgetOpenAI(FakeOpenAI):
+        def __init__(self):
+            super().__init__(pass1_action="ABSTAIN", pass2_action="ABSTAIN")
+            self.output_allowances = []
+
+        def create_structured(self, **kwargs):
+            self.output_allowances.append(kwargs["max_output_tokens"])
+            enum_for = kwargs["schema"]["properties"]["evidence_for"]["items"]["enum"]
+            enum_against = kwargs["schema"]["properties"]["evidence_against"]["items"]["enum"]
+            assert enum_for == enum_against
+            return super().create_structured(**kwargs)
+
+    openai = BudgetOpenAI()
+    decision = start_pilot(
+        successor,
+        nansen=NeverNansen(),
+        openai=openai,
+        clock=lambda: datetime(2026, 8, 18, 5, 1, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+
+    assert decision.manifest["stage"] == "decision_sealed"
+    assert openai.output_allowances == [4000, 25_000]
+    assert BudgetGuard(decision.root).replay().calls == 0
+    assert decision.root / "MODEL-RESULT.md" in check_pilot(decision)
 
 
 def test_full_fake_lifecycle_uses_exact_billable_calls_and_replays_offline(tmp_path):

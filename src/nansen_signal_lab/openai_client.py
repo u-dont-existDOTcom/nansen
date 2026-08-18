@@ -170,7 +170,14 @@ def structured_request_body(
     input_json: dict[str, Any],
     schema_name: str,
     schema: dict[str, Any],
+    max_output_tokens: int = 4000,
 ) -> dict[str, Any]:
+    if (
+        isinstance(max_output_tokens, bool)
+        or not isinstance(max_output_tokens, int)
+        or not 1 <= max_output_tokens <= 128_000
+    ):
+        raise ValueError("max_output_tokens must be an integer from 1 through 128000")
     canonical_input = json.dumps(
         input_json,
         ensure_ascii=False,
@@ -189,7 +196,7 @@ def structured_request_body(
             "strict": True,
             "schema": schema,
         }},
-        "max_output_tokens": 4000,
+        "max_output_tokens": max_output_tokens,
         "store": False,
     }
 
@@ -298,6 +305,7 @@ class OpenAIClient:
         input_json: dict[str, Any],
         schema_name: str,
         schema: dict[str, Any],
+        max_output_tokens: int = 4000,
     ) -> OpenAIEvidenceResponse:
         if model_id != PROSPECTIVE_MODEL_ID:
             raise OpenAIError("prospective model ID is fixed", transmitted=False)
@@ -307,5 +315,6 @@ class OpenAIClient:
             input_json=input_json,
             schema_name=schema_name,
             schema=schema,
+            max_output_tokens=max_output_tokens,
         )
         return self._request("POST", "responses", body=body)

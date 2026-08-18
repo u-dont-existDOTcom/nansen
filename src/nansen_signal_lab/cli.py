@@ -264,7 +264,11 @@ def cmd_evaluate(args):
 
 
 def cmd_pilot_init(args):
-    model_successor_protocols = {"schema-subset-v5", "citation-enum-v6"}
+    model_successor_protocols = {
+        "schema-subset-v5",
+        "citation-enum-v6",
+        "pass2-budget-v7",
+    }
     if args.protocol_version in model_successor_protocols:
         if not args.source_manifest:
             raise ValueError(f"{args.protocol_version} requires --source-manifest")
@@ -397,6 +401,7 @@ def build_parser():
             "contract-context-v4",
             "schema-subset-v5",
             "citation-enum-v6",
+            "pass2-budget-v7",
         ),
         default="strict-v1",
     )

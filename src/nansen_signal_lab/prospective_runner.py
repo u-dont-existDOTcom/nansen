@@ -72,6 +72,7 @@ _DESIGN_V3_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pi
 _DESIGN_V4_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md"
 _DESIGN_V5_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md"
 _DESIGN_V6_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-citation-enum-v6.md"
+_DESIGN_V7_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-pass2-budget-v7.md"
 _PROTOCOL_DESIGNS = {
     "strict-v1": _DESIGN_PATH,
     "account-baseline-v2": _DESIGN_V2_PATH,
@@ -79,12 +80,19 @@ _PROTOCOL_DESIGNS = {
     "contract-context-v4": _DESIGN_V4_PATH,
     "schema-subset-v5": _DESIGN_V5_PATH,
     "citation-enum-v6": _DESIGN_V6_PATH,
+    "pass2-budget-v7": _DESIGN_V7_PATH,
 }
 _MODEL_SUCCESSOR_PROTOCOLS = {
     "schema-subset-v5": _DESIGN_V4_PATH,
     "citation-enum-v6": _DESIGN_V5_PATH,
+    "pass2-budget-v7": _DESIGN_V6_PATH,
 }
-_MODEL_SUCCESSOR_DESIGNS = frozenset({_DESIGN_V5_PATH, _DESIGN_V6_PATH})
+_MODEL_SUCCESSOR_DESIGNS = frozenset(
+    {_DESIGN_V5_PATH, _DESIGN_V6_PATH, _DESIGN_V7_PATH}
+)
+_PASS1_MAX_OUTPUT_TOKENS = 4000
+_PASS2_DEFAULT_MAX_OUTPUT_TOKENS = 4000
+_PASS2_V7_MAX_OUTPUT_TOKENS = 25_000
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _EVIDENCE_TIMESTAMP_FIELDS = {
     "request_started_at",
@@ -335,6 +343,16 @@ def initialize_pilot(
             "passes": 2,
             "reasoning_effort": "high",
             "tools": [],
+            **(
+                {
+                    "max_output_tokens": {
+                        "pass_1": _PASS1_MAX_OUTPUT_TOKENS,
+                        "pass_2": _PASS2_V7_MAX_OUTPUT_TOKENS,
+                    }
+                }
+                if protocol_version == "pass2-budget-v7"
+                else {}
+            ),
         },
         "selection": (
             {
@@ -437,11 +455,16 @@ def initialize_pilot(
         ),
         "created_at": timestamp,
         "hypothesis": (
-            "The corrected strict schema permits two validated gpt-5.6-sol passes "
-            "over the exact sealed v4 blind snapshot."
-            if is_model_successor
-            else "A sealed identity-blinded GPT decision can be compared prospectively "
-            "with frozen deterministic strategies using common observed paper fills."
+            "A 25,000-token Pass-2 output allowance permits the unchanged high-reasoning "
+            "exact-citation protocol to complete over the exact sealed blind snapshot."
+            if protocol_version == "pass2-budget-v7"
+            else (
+                "The corrected strict schema permits two validated gpt-5.6-sol passes "
+                "over the exact sealed v4 blind snapshot."
+                if is_model_successor
+                else "A sealed identity-blinded GPT decision can be compared prospectively "
+                "with frozen deterministic strategies using common observed paper fills."
+            )
         ),
         "stage": "preregistered",
         "source_strategy_manifest": _SOURCE_PATH,
@@ -1220,7 +1243,15 @@ def _seal_decision(
     decision_artifacts: list[Path] = []
     writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
     already_sealed = {item["path"] for item in current.manifest["artifacts"]}
-    exact_evidence_paths = current.manifest["design_path"] == _DESIGN_V6_PATH
+    exact_evidence_paths = current.manifest["design_path"] in {
+        _DESIGN_V6_PATH,
+        _DESIGN_V7_PATH,
+    }
+    pass2_max_output_tokens = (
+        _PASS2_V7_MAX_OUTPUT_TOKENS
+        if current.manifest["design_path"] == _DESIGN_V7_PATH
+        else _PASS2_DEFAULT_MAX_OUTPUT_TOKENS
+    )
     try:
         if exact_evidence_paths:
             admissible_evidence_paths(blinded)
@@ -1264,6 +1295,7 @@ def _seal_decision(
             theory_records,
             writer,
             exact_evidence_paths=exact_evidence_paths,
+            max_output_tokens=pass2_max_output_tokens,
         )
         decision_artifacts.extend(_model_paths(current.root, "pass-1"))
         decision_artifacts.extend(_model_paths(current.root, "pass-2"))

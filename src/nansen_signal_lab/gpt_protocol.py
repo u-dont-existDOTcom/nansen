@@ -757,6 +757,7 @@ def _obtain_response(
     input_json: dict[str, Any],
     schema_name: str,
     schema: dict[str, Any],
+    max_output_tokens: int,
 ) -> tuple[OpenAIEvidenceResponse, Path]:
     request_path = writer.request_path(scope, attempt)
     response_path = writer.response_path(scope, attempt)
@@ -778,6 +779,7 @@ def _obtain_response(
             input_json=input_json,
             schema_name=schema_name,
             schema=schema,
+            max_output_tokens=max_output_tokens,
         )
     except OpenAIError as exc:
         if exc.response is not None:
@@ -861,6 +863,7 @@ def _run_pass(
     instructions: str,
     original_input: dict[str, Any],
     snapshot_sha256: str,
+    max_output_tokens: int,
     validate: Callable[[dict[str, Any]], list[str]],
 ) -> GPTPassResult:
     final_path = writer.final_path(scope)
@@ -895,6 +898,7 @@ def _run_pass(
                 input_json=input_json,
                 schema_name=schema_name,
                 schema=schema,
+                max_output_tokens=max_output_tokens,
             )
             expected_request = _request_document(
                 scope=scope,
@@ -960,6 +964,7 @@ def _run_pass(
             input_json=input_json,
             schema_name=schema_name,
             schema=schema,
+            max_output_tokens=max_output_tokens,
         )
         request_document = _request_document(
             scope=scope,
@@ -978,6 +983,7 @@ def _run_pass(
             input_json=input_json,
             schema_name=schema_name,
             schema=schema,
+            max_output_tokens=max_output_tokens,
         )
         value = _parsed_model_output(response)
         errors = validate(value)
@@ -1061,6 +1067,7 @@ def run_pass1(
         instructions=PASS1_INSTRUCTIONS,
         original_input=input_json,
         snapshot_sha256=snapshot_sha256,
+        max_output_tokens=4000,
         validate=lambda value: _validate_pass1(
             value,
             snapshot_value,
@@ -1077,6 +1084,7 @@ def run_pass2(
     writer: GPTArtifactWriter,
     *,
     exact_evidence_paths: bool = False,
+    max_output_tokens: int = 4000,
 ) -> GPTPassResult:
     _, _, snapshot_value, snapshot_sha256 = _load_snapshot(snapshot)
     admissible = (
@@ -1143,6 +1151,7 @@ def run_pass2(
         instructions=PASS2_INSTRUCTIONS,
         original_input=input_json,
         snapshot_sha256=snapshot_sha256,
+        max_output_tokens=max_output_tokens,
         validate=lambda value: _validate_pass2(
             value,
             snapshot_value,
