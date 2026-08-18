@@ -151,6 +151,149 @@ def test_strict_provider_schemas_omit_unsupported_unique_items(tmp_path):
     )
 
 
+def test_exact_citation_schema_enumerates_only_admissible_scalar_paths(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import (
+        admissible_evidence_paths,
+        run_pass1,
+    )
+
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps({
+        "schema_version": 1,
+        "artifact_written_at": "2026-08-17T10:00:01Z",
+        "available_at": "2026-08-17T10:00:00Z",
+        "candidate": {"identity": "candidate-1", "chain": "solana"},
+        "flow_intelligence": {"data": {"smart_trader_net_flow_usd": 25.0}},
+        "smart_money": {
+            "feature_set_version": "community-signals-v1",
+            "rows": [{"value_usd": 50.0}],
+            "final_feature": {
+                "holdings_change_1h_pct": 2.5,
+                "holdings_acceleration_12h_pct_per_hour": None,
+                "source_experiment_id": "prospective-snapshot",
+            },
+        },
+        "selection": {"formula": "min(1000, 0.001 * liquidity_usd)"},
+    }, sort_keys=True))
+    expected = (
+        "available_at",
+        "flow_intelligence.data.smart_trader_net_flow_usd",
+        "smart_money.final_feature.holdings_change_1h_pct",
+    )
+    assert admissible_evidence_paths(json.loads(snapshot.read_text())) == expected
+
+    client = FakeClient(_response(_pass1_value()))
+    run_pass1(
+        client,
+        snapshot,
+        _writer(tmp_path),
+        exact_evidence_paths=True,
+    )
+    schema = client.calls[0]["schema"]
+    assert client.calls[0]["schema_name"] == "prospective_pass_1_exact_citations"
+    assert schema["properties"]["evidence_for"]["items"] == {
+        "type": "string",
+        "enum": list(expected),
+    }
+    assert schema["properties"]["evidence_against"]["items"] == {
+        "type": "string",
+        "enum": list(expected),
+    }
+    assert "enum" not in schema["properties"]["missing_evidence"]["items"]
+
+
+def test_exact_citation_local_validation_rejects_existing_but_excluded_path(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import run_pass1
+
+    invalid = _pass1_value(evidence_for=["candidate.chain"])
+    client = FakeClient(
+        _response(invalid, response_id="excluded"),
+        _response(_pass1_value(), response_id="repaired"),
+    )
+    result = run_pass1(
+        client,
+        _snapshot(tmp_path / "snapshot.json"),
+        _writer(tmp_path),
+        exact_evidence_paths=True,
+    )
+    assert result.response_id == "repaired"
+    errors = client.calls[1]["input_json"]["repair"]["validation_errors"]
+    assert any("not an admissible exact snapshot path" in error for error in errors)
+
+
+def test_exact_citation_provider_limit_failure_happens_before_request_install(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import GPTProtocolError, run_pass1
+
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text(json.dumps({
+        "smart_money": {
+            "final_feature": {f"metric_{index}": index for index in range(469)}
+        }
+    }))
+    client = FakeClient(_response(_pass1_value()))
+    with pytest.raises(GPTProtocolError, match="enum limits"):
+        run_pass1(
+            client,
+            snapshot,
+            _writer(tmp_path),
+            exact_evidence_paths=True,
+        )
+    assert client.calls == []
+    assert not (tmp_path / "model/pass-1/attempt-1-request.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("snapshot", "message"),
+    (
+        (
+            {
+                "metrics": {
+                    (f"metric_{index:03d}_" + "x" * 60): index
+                    for index in range(251)
+                }
+            },
+            "path strings exceed provider enum limits",
+        ),
+        (
+            {
+                (f"metric_{index:03d}_" + "x" * 220): index
+                for index in range(250)
+            },
+            "total schema string limits",
+        ),
+    ),
+)
+def test_exact_citation_provider_string_limits_are_fail_closed(snapshot, message):
+    from src.nansen_signal_lab.gpt_protocol import (
+        GPTProtocolError,
+        admissible_evidence_paths,
+    )
+
+    with pytest.raises(GPTProtocolError, match=message):
+        admissible_evidence_paths(snapshot)
+
+
+def test_finalized_pass_rejects_non_enum_request_on_exact_resume(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import GPTProtocolError, run_pass1
+
+    snapshot = _snapshot(tmp_path / "snapshot.json")
+    run_pass1(
+        FakeClient(_response(_pass1_value(), response_id="non-enum")),
+        snapshot,
+        _writer(tmp_path),
+    )
+
+    no_reroll = FakeClient()
+    with pytest.raises(GPTProtocolError, match="requested attempt"):
+        run_pass1(
+            no_reroll,
+            snapshot,
+            _writer(tmp_path),
+            exact_evidence_paths=True,
+        )
+    assert no_reroll.calls == []
+
+
 @pytest.mark.parametrize(
     "invalid",
     [
@@ -360,6 +503,34 @@ def test_pass2_receives_literal_pass1_response_hash_and_same_snapshot(tmp_path):
     assert sent["pass1"]["response_sha256"] == pass1.response_sha256
     assert sent["pass1"]["value"] == pass1.value
     assert len(sent["theory_records"]) == 6
+
+
+def test_pass2_exact_citation_schema_reuses_same_snapshot_path_enum(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import run_pass1, run_pass2
+
+    snapshot = _snapshot(tmp_path / "snapshot.json")
+    pass1_client = FakeClient(_response(_pass1_value(), response_id="p1"))
+    pass1 = run_pass1(
+        pass1_client,
+        snapshot,
+        _writer(tmp_path),
+        exact_evidence_paths=True,
+    )
+    value = _pass2_value(pass1.snapshot_sha256, pass1.response_sha256)
+    pass2_client = FakeClient(_response(value, response_id="p2"))
+    run_pass2(
+        pass2_client,
+        snapshot,
+        pass1,
+        _theories(),
+        _writer(tmp_path),
+        exact_evidence_paths=True,
+    )
+    schema = pass2_client.calls[0]["schema"]
+    enum = ["completeness.available_at", "smart_money.final_feature.holdings_change_1h_pct"]
+    assert pass2_client.calls[0]["schema_name"] == "prospective_pass_2_exact_citations"
+    assert schema["properties"]["evidence_for"]["items"]["enum"] == enum
+    assert schema["properties"]["evidence_against"]["items"]["enum"] == enum
 
 
 def test_pass2_rejects_snapshot_or_pass1_hash_mutation_and_record_coverage(tmp_path):

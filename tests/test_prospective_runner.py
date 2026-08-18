@@ -28,6 +28,7 @@ def _repo(tmp_path: Path) -> Path:
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md",
+        "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-citation-enum-v6.md",
         "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
     ):
         target = repo / relative
@@ -215,7 +216,7 @@ class FakeOpenAI:
     def create_structured(self, **kwargs):
         self.calls.append(("structured", kwargs["schema_name"]))
         input_value = kwargs["input_json"]
-        if kwargs["schema_name"] == "prospective_pass_1":
+        if kwargs["schema_name"].startswith("prospective_pass_1"):
             value = {
                 "action": self.pass1_action,
                 "confidence": 0.7,
@@ -702,6 +703,126 @@ def test_v5_reuses_exact_v4_snapshot_and_never_calls_nansen(tmp_path):
             decision,
             nansen=NeverNansen(),
             clock=lambda: datetime(2026, 8, 17, 16, tzinfo=timezone.utc),
+        )
+
+
+def test_v6_reuses_exact_v5_snapshot_and_sends_only_enumerated_citations(
+    tmp_path,
+    monkeypatch,
+):
+    from src.nansen_signal_lab.budget import BudgetGuard
+    from src.nansen_signal_lab.prospective_runner import (
+        PilotError,
+        check_pilot,
+        initialize_model_successor,
+        replay_pilot,
+        settle_pilot,
+        start_pilot,
+    )
+
+    repo = _repo(tmp_path)
+    source_name = "2026-08-18-gpt-prospective-pilot-schema-subset-v5"
+    shutil.copy2(
+        ROOT / "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
+        repo / "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
+    )
+    shutil.copytree(
+        ROOT / "research/experiments" / source_name,
+        repo / "research/experiments" / source_name,
+    )
+    source_manifest = repo / "research/experiments" / source_name / "manifest.json"
+    source_snapshot = source_manifest.parent / "normalized/snapshot.json"
+
+    with pytest.raises(PilotError, match="wrong predecessor"):
+        initialize_model_successor(
+            repo / "research/experiments/invalid-v5-successor",
+            source_manifest=source_manifest,
+            created_at=datetime(2026, 8, 18, 3, tzinfo=timezone.utc),
+            protocol_version="schema-subset-v5",
+        )
+
+    successor = initialize_model_successor(
+        repo / "research/experiments/citation-enum-v6",
+        source_manifest=source_manifest,
+        created_at=datetime(2026, 8, 18, 3, tzinfo=timezone.utc),
+        protocol_version="citation-enum-v6",
+    )
+    assert successor.manifest["stage"] == "snapshot_collected"
+    assert successor.manifest["design_path"].endswith("citation-enum-v6.md")
+    assert (successor.root / "normalized/snapshot.json").read_bytes() == source_snapshot.read_bytes()
+    assert BudgetGuard(successor.root).replay().calls == 0
+
+    class NeverNansen:
+        def __getattr__(self, name):
+            raise AssertionError(f"Nansen must not be touched: {name}")
+
+    oversized = initialize_model_successor(
+        repo / "research/experiments/citation-enum-v6-oversized",
+        source_manifest=source_manifest,
+        created_at=datetime(2026, 8, 18, 3, tzinfo=timezone.utc),
+        protocol_version="citation-enum-v6",
+    )
+
+    from src.nansen_signal_lab import prospective_runner
+    from src.nansen_signal_lab.gpt_protocol import GPTProtocolError
+
+    def reject_oversized_paths(_snapshot):
+        raise GPTProtocolError("admissible citation paths exceed provider enum limits")
+
+    blocked_openai = FakeOpenAI()
+    with monkeypatch.context() as scoped:
+        scoped.setattr(
+            prospective_runner,
+            "admissible_evidence_paths",
+            reject_oversized_paths,
+        )
+        blocked = start_pilot(
+            oversized,
+            nansen=NeverNansen(),
+            openai=blocked_openai,
+            clock=lambda: datetime(2026, 8, 18, 3, 1, tzinfo=timezone.utc),
+            sleep=lambda _seconds: None,
+        )
+    assert blocked.manifest["stage"] == "unscorable"
+    assert blocked_openai.calls == []
+    assert not (blocked.root / "model/preflight/attempt-1-request.json").exists()
+
+    class ExactCitationOpenAI(FakeOpenAI):
+        def create_structured(self, **kwargs):
+            enum_for = kwargs["schema"]["properties"]["evidence_for"]["items"]["enum"]
+            enum_against = kwargs["schema"]["properties"]["evidence_against"]["items"]["enum"]
+            assert enum_for == enum_against
+            assert enum_for == sorted(enum_for)
+            assert len(enum_for) * 2 <= 1000
+            assert not any(path.startswith("candidate.") or ".rows." in path for path in enum_for)
+            return super().create_structured(**kwargs)
+
+    openai = ExactCitationOpenAI(pass1_action="ABSTAIN", pass2_action="ABSTAIN")
+    decision = start_pilot(
+        successor,
+        nansen=NeverNansen(),
+        openai=openai,
+        clock=lambda: datetime(2026, 8, 18, 3, 1, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+    assert decision.manifest["stage"] == "decision_sealed"
+    assert openai.calls == [
+        ("preflight", "gpt-5.6-sol"),
+        ("structured", "prospective_pass_1_exact_citations"),
+        ("structured", "prospective_pass_2_exact_citations"),
+    ]
+    pass1_request = json.loads(
+        (decision.root / "model/pass-1/attempt-1-request.json").read_text()
+    )
+    assert "enum" in pass1_request["request_body"]["text"]["format"]["schema"]["properties"]["evidence_for"]["items"]
+    assert BudgetGuard(decision.root).replay().calls == 0
+    assert replay_pilot(decision)["nansen_credits"] == 0
+    assert decision.root / "MODEL-RESULT.md" in check_pilot(decision)
+    with pytest.raises(PilotError, match="model-only"):
+        settle_pilot(
+            decision,
+            nansen=NeverNansen(),
+            clock=lambda: datetime(2026, 8, 18, 8, tzinfo=timezone.utc),
         )
 
 

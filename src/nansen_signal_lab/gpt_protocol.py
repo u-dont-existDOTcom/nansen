@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,20 @@ RISK_FLAGS = (
     "EXECUTION_RISK",
     "MODEL_UNCERTAINTY",
 )
+
+_EVIDENCE_PATH_EXCLUDED_ROOTS = frozenset({"candidate"})
+_EVIDENCE_PATH_EXCLUDED_SEGMENTS = frozenset({"rows"})
+_EVIDENCE_PATH_EXCLUDED_LEAVES = frozenset({
+    "artifact_written_at",
+    "feature_set_version",
+    "formula",
+    "schema_version",
+    "source_experiment_id",
+})
+_PROVIDER_ENUM_VALUE_LIMIT = 1000
+_PROVIDER_LARGE_ENUM_STRING_LIMIT = 15_000
+_PROVIDER_TOTAL_SCHEMA_STRING_LIMIT = 120_000
+_PROVIDER_SCHEMA_STRING_RESERVE = 20_000
 
 
 PASS1_SCHEMA: dict[str, Any] = {
@@ -150,6 +165,67 @@ PASS2_SCHEMA: dict[str, Any] = {
         "rationale": _string_schema(),
     },
 }
+
+
+def admissible_evidence_paths(snapshot: dict[str, Any]) -> tuple[str, ...]:
+    """Return deterministic, analytically relevant scalar paths for citations."""
+
+    if not isinstance(snapshot, dict):
+        raise GPTProtocolError("citation source snapshot must be an object")
+    paths: list[str] = []
+
+    def visit(value: Any, parts: tuple[str, ...]) -> None:
+        if parts and (
+            parts[0] in _EVIDENCE_PATH_EXCLUDED_ROOTS
+            or any(part in _EVIDENCE_PATH_EXCLUDED_SEGMENTS for part in parts)
+            or parts[-1] in _EVIDENCE_PATH_EXCLUDED_LEAVES
+        ):
+            return
+        if isinstance(value, dict):
+            for key in sorted(value):
+                if not isinstance(key, str) or not key or "." in key:
+                    continue
+                visit(value[key], (*parts, key))
+            return
+        if isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, (*parts, str(index)))
+            return
+        if value is None:
+            return
+        if isinstance(value, float) and not math.isfinite(value):
+            raise GPTProtocolError("non-finite value in citation source snapshot")
+        if isinstance(value, (str, bool, int, float)) and parts:
+            paths.append(".".join(parts))
+
+    visit(snapshot, ())
+    result = tuple(sorted(set(paths)))
+    if not result:
+        raise GPTProtocolError("citation source snapshot has no admissible scalar paths")
+    # Each schema repeats the same enum for evidence_for and evidence_against.
+    # Leave room for the protocol's other small enums under the provider-wide cap.
+    if len(result) * 2 + 64 > _PROVIDER_ENUM_VALUE_LIMIT:
+        raise GPTProtocolError("admissible citation paths exceed provider enum limits")
+    if any(len(path) > 240 for path in result):
+        raise GPTProtocolError("admissible citation path exceeds the local response limit")
+    if len(result) > 250 and sum(map(len, result)) > _PROVIDER_LARGE_ENUM_STRING_LIMIT:
+        raise GPTProtocolError("admissible citation path strings exceed provider enum limits")
+    if (
+        sum(map(len, result)) * 2
+        > _PROVIDER_TOTAL_SCHEMA_STRING_LIMIT - _PROVIDER_SCHEMA_STRING_RESERVE
+    ):
+        raise GPTProtocolError("admissible citation paths exceed total schema string limits")
+    return result
+
+
+def _schema_with_exact_evidence_paths(
+    template: dict[str, Any], paths: tuple[str, ...]
+) -> dict[str, Any]:
+    schema = deepcopy(template)
+    items = {"type": "string", "enum": list(paths)}
+    schema["properties"]["evidence_for"]["items"] = deepcopy(items)
+    schema["properties"]["evidence_against"]["items"] = deepcopy(items)
+    return schema
 
 
 PASS1_INSTRUCTIONS = """You are an independent prospective market analyst. Analyze only the supplied identity-blinded, point-in-time snapshot. Choose LONG or ABSTAIN for a fixed four-hour paper objective. Cite only field paths that exist in the supplied snapshot. Do not infer token identity, use tools, request outside data, or discuss future outcomes. Return only the required structured object."""
@@ -424,7 +500,13 @@ def _unique_strings(
     return strings
 
 
-def _validate_evidence_lists(value: dict[str, Any], snapshot: dict[str, Any], errors: list[str]) -> None:
+def _validate_evidence_lists(
+    value: dict[str, Any],
+    snapshot: dict[str, Any],
+    errors: list[str],
+    *,
+    admissible_paths: set[str] | None = None,
+) -> None:
     evidence_for = _unique_strings(value.get("evidence_for"), label="evidence_for", errors=errors)
     evidence_against = _unique_strings(
         value.get("evidence_against"), label="evidence_against", errors=errors
@@ -432,12 +514,21 @@ def _validate_evidence_lists(value: dict[str, Any], snapshot: dict[str, Any], er
     if len(evidence_for + evidence_against) != len(set(evidence_for + evidence_against)):
         errors.append("evidence references must be unique across for and against lists")
     for reference in evidence_for + evidence_against:
-        if not _field_exists(snapshot, reference):
+        if admissible_paths is not None and reference not in admissible_paths:
+            errors.append(
+                f"evidence reference is not an admissible exact snapshot path: {reference}"
+            )
+        elif not _field_exists(snapshot, reference):
             errors.append(f"evidence reference does not exist in snapshot: {reference}")
     _unique_strings(value.get("missing_evidence"), label="missing_evidence", errors=errors)
 
 
-def _validate_pass1(value: Any, snapshot: dict[str, Any]) -> list[str]:
+def _validate_pass1(
+    value: Any,
+    snapshot: dict[str, Any],
+    *,
+    admissible_paths: set[str] | None = None,
+) -> list[str]:
     errors: list[str] = []
     keys = PASS1_SCHEMA["required"]
     if not _exact_keys(value, keys, label="Pass 1", errors=errors):
@@ -455,7 +546,9 @@ def _validate_pass1(value: Any, snapshot: dict[str, Any]) -> list[str]:
         errors.append("confidence must be a finite number in [0, 1]")
     if value["expected_direction_4h"] not in {"UP", "FLAT", "DOWN"}:
         errors.append("expected_direction_4h must be UP, FLAT, or DOWN")
-    _validate_evidence_lists(value, snapshot, errors)
+    _validate_evidence_lists(
+        value, snapshot, errors, admissible_paths=admissible_paths
+    )
     _bounded_text(value["rationale"], label="rationale", errors=errors)
     _unique_strings(
         value["risk_flags"],
@@ -490,6 +583,7 @@ def _validate_pass2(
     snapshot_sha256: str,
     pass1_response_sha256: str,
     theory_ids: tuple[str, ...],
+    admissible_paths: set[str] | None = None,
 ) -> list[str]:
     errors: list[str] = []
     if not _exact_keys(value, PASS2_SCHEMA["required"], label="Pass 2", errors=errors):
@@ -555,7 +649,9 @@ def _validate_pass2(
                 errors.append("conflicts must not repeat a theory ID")
             conflict_ids.append(identifier)
             _bounded_text(conflict["description"], label=f"{label}.description", errors=errors)
-    _validate_evidence_lists(value, snapshot, errors)
+    _validate_evidence_lists(
+        value, snapshot, errors, admissible_paths=admissible_paths
+    )
     _bounded_text(value["rationale"], label="rationale", errors=errors)
     return errors
 
@@ -671,21 +767,7 @@ def _obtain_response(
     if request_exists:
         if not response_exists:
             raise GPTProtocolError("ambiguous OpenAI request has no response; refusing reroll")
-        archived_raw = request_path.read_bytes()
-        archived = _json_object(archived_raw, label="OpenAI request artifact")
-        if archived_raw != canonical_json_bytes(archived):
-            raise GPTProtocolError("archived OpenAI request is not canonical")
-        archived_started_at = archived.pop("request_started_at", None)
-        archived_written_at = archived.pop("artifact_written_at", None)
-        expected = dict(request_document)
-        expected.pop("request_started_at", None)
-        expected.pop("artifact_written_at", None)
-        if (
-            not isinstance(archived_started_at, str)
-            or not isinstance(archived_written_at, str)
-            or archived != expected
-        ):
-            raise GPTProtocolError("archived OpenAI request does not match the requested attempt")
+        _validate_archived_request(request_path, request_document)
         return _load_response(writer, scope, attempt), request_path
 
     request_path = writer.install_request(scope, attempt, request_document)
@@ -704,6 +786,27 @@ def _obtain_response(
         raise GPTProtocolError(f"OpenAI request failed {classification}: {exc}") from exc
     response_path = writer.install_response(scope, attempt, response)
     return response, request_path
+
+
+def _validate_archived_request(
+    request_path: Path,
+    expected_document: dict[str, Any],
+) -> None:
+    archived_raw = request_path.read_bytes()
+    archived = _json_object(archived_raw, label="OpenAI request artifact")
+    if archived_raw != canonical_json_bytes(archived):
+        raise GPTProtocolError("archived OpenAI request is not canonical")
+    archived_started_at = archived.pop("request_started_at", None)
+    archived_written_at = archived.pop("artifact_written_at", None)
+    expected = dict(expected_document)
+    expected.pop("request_started_at", None)
+    expected.pop("artifact_written_at", None)
+    if (
+        not isinstance(archived_started_at, str)
+        or not isinstance(archived_written_at, str)
+        or archived != expected
+    ):
+        raise GPTProtocolError("archived OpenAI request does not match the requested attempt")
 
 
 def _parsed_model_output(response: OpenAIEvidenceResponse) -> dict[str, Any]:
@@ -778,6 +881,46 @@ def _run_pass(
         attempt = final.get("attempt")
         if attempt not in (1, 2):
             raise GPTProtocolError("final pointer attempt is invalid")
+        input_json = original_input
+        for archived_attempt in range(1, attempt + 1):
+            archived_request_path = writer.request_path(scope, archived_attempt)
+            if not _regular_file(
+                archived_request_path,
+                label="OpenAI request artifact",
+            ):
+                raise GPTProtocolError("final pointer request history is incomplete")
+            request_body = structured_request_body(
+                model_id=PROSPECTIVE_MODEL_ID,
+                instructions=instructions,
+                input_json=input_json,
+                schema_name=schema_name,
+                schema=schema,
+            )
+            expected_request = _request_document(
+                scope=scope,
+                attempt=archived_attempt,
+                request_body=request_body,
+                snapshot_sha256=snapshot_sha256,
+                writer=writer,
+            )
+            _validate_archived_request(archived_request_path, expected_request)
+            if archived_attempt < attempt:
+                prior_response = _load_response(writer, scope, archived_attempt)
+                prior_value = _parsed_model_output(prior_response)
+                prior_errors = validate(prior_value)
+                if not prior_errors:
+                    raise GPTProtocolError(
+                        "final pointer repair attempt follows valid structured output"
+                    )
+                input_json = {
+                    "repair": {
+                        "invalid_response": prior_value,
+                        "validation_errors": prior_errors,
+                    },
+                    "original_input": original_input,
+                    "original_schema": schema,
+                }
+                _assert_no_forbidden_input(input_json)
         response = _load_response(writer, scope, attempt)
         request_path = writer.request_path(scope, attempt)
         response_path = writer.response_path(scope, attempt)
@@ -883,8 +1026,22 @@ def _run_pass(
     raise AssertionError("bounded pass loop exhausted")
 
 
-def run_pass1(client: Any, snapshot: str | Path, writer: GPTArtifactWriter) -> GPTPassResult:
+def run_pass1(
+    client: Any,
+    snapshot: str | Path,
+    writer: GPTArtifactWriter,
+    *,
+    exact_evidence_paths: bool = False,
+) -> GPTPassResult:
     _, _, snapshot_value, snapshot_sha256 = _load_snapshot(snapshot)
+    admissible = (
+        admissible_evidence_paths(snapshot_value) if exact_evidence_paths else None
+    )
+    schema = (
+        _schema_with_exact_evidence_paths(PASS1_SCHEMA, admissible)
+        if admissible is not None
+        else PASS1_SCHEMA
+    )
     input_json = {
         "objective": "Choose LONG or ABSTAIN for the fixed four-hour paper outcome.",
         "snapshot_sha256": snapshot_sha256,
@@ -895,12 +1052,20 @@ def run_pass1(client: Any, snapshot: str | Path, writer: GPTArtifactWriter) -> G
         client=client,
         writer=writer,
         scope="pass-1",
-        schema_name="prospective_pass_1",
-        schema=PASS1_SCHEMA,
+        schema_name=(
+            "prospective_pass_1_exact_citations"
+            if exact_evidence_paths
+            else "prospective_pass_1"
+        ),
+        schema=schema,
         instructions=PASS1_INSTRUCTIONS,
         original_input=input_json,
         snapshot_sha256=snapshot_sha256,
-        validate=lambda value: _validate_pass1(value, snapshot_value),
+        validate=lambda value: _validate_pass1(
+            value,
+            snapshot_value,
+            admissible_paths=set(admissible) if admissible is not None else None,
+        ),
     )
 
 
@@ -910,8 +1075,14 @@ def run_pass2(
     pass1: GPTPassResult,
     theory_records: Iterable[dict[str, Any]],
     writer: GPTArtifactWriter,
+    *,
+    exact_evidence_paths: bool = False,
 ) -> GPTPassResult:
     _, _, snapshot_value, snapshot_sha256 = _load_snapshot(snapshot)
+    admissible = (
+        admissible_evidence_paths(snapshot_value) if exact_evidence_paths else None
+    )
+    allowed_paths = set(admissible) if admissible is not None else None
     if snapshot_sha256 != pass1.snapshot_sha256:
         raise GPTProtocolError("Pass 2 snapshot differs from the exact Pass 1 snapshot")
     if not _regular_file(pass1.response_path, label="Pass 1 response artifact"):
@@ -927,7 +1098,9 @@ def run_pass2(
         raise GPTProtocolError("Pass 1 final pointer attempt is invalid")
     archived_pass1 = _load_response(writer, "pass-1", attempt)
     archived_value = _parsed_model_output(archived_pass1)
-    if _validate_pass1(archived_value, snapshot_value):
+    if _validate_pass1(
+        archived_value, snapshot_value, admissible_paths=allowed_paths
+    ):
         raise GPTProtocolError("Pass 1 final response is no longer valid")
     if archived_value != pass1.value:
         raise GPTProtocolError("Pass 1 value does not match the exact archived response")
@@ -957,8 +1130,16 @@ def run_pass2(
         client=client,
         writer=writer,
         scope="pass-2",
-        schema_name="prospective_pass_2",
-        schema=PASS2_SCHEMA,
+        schema_name=(
+            "prospective_pass_2_exact_citations"
+            if exact_evidence_paths
+            else "prospective_pass_2"
+        ),
+        schema=(
+            _schema_with_exact_evidence_paths(PASS2_SCHEMA, admissible)
+            if admissible is not None
+            else PASS2_SCHEMA
+        ),
         instructions=PASS2_INSTRUCTIONS,
         original_input=input_json,
         snapshot_sha256=snapshot_sha256,
@@ -968,6 +1149,7 @@ def run_pass2(
             snapshot_sha256=snapshot_sha256,
             pass1_response_sha256=pass1.response_sha256,
             theory_ids=identifiers,
+            admissible_paths=allowed_paths,
         ),
     )
 

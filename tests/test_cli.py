@@ -462,6 +462,14 @@ def test_pilot_offline_commands_never_load_credentials_or_construct_clients(
 
 def test_pilot_parser_has_fixed_budget_and_no_override_flags():
     parser = cli.build_parser()
+    successor = parser.parse_args([
+        "pilot-init",
+        "--experiment-dir", "experiment-v6",
+        "--protocol-version", "citation-enum-v6",
+        "--source-manifest", "source-v5/manifest.json",
+    ])
+    assert successor.protocol_version == "citation-enum-v6"
+    assert successor.source_manifest == "source-v5/manifest.json"
     args = parser.parse_args([
         "pilot-start",
         "--manifest", "experiment/manifest.json",

@@ -264,17 +264,19 @@ def cmd_evaluate(args):
 
 
 def cmd_pilot_init(args):
-    if args.protocol_version == "schema-subset-v5":
+    model_successor_protocols = {"schema-subset-v5", "citation-enum-v6"}
+    if args.protocol_version in model_successor_protocols:
         if not args.source_manifest:
-            raise ValueError("schema-subset-v5 requires --source-manifest")
+            raise ValueError(f"{args.protocol_version} requires --source-manifest")
         bundle = initialize_model_successor(
             Path(args.experiment_dir),
             source_manifest=Path(args.source_manifest),
             created_at=datetime.now(timezone.utc),
+            protocol_version=args.protocol_version,
         )
     else:
         if args.source_manifest:
-            raise ValueError("--source-manifest is only valid for schema-subset-v5")
+            raise ValueError("--source-manifest is only valid for model-successor protocols")
         bundle = initialize_pilot(
             Path(args.experiment_dir),
             created_at=datetime.now(timezone.utc),
@@ -394,6 +396,7 @@ def build_parser():
             "completed-flow-v3",
             "contract-context-v4",
             "schema-subset-v5",
+            "citation-enum-v6",
         ),
         default="strict-v1",
     )

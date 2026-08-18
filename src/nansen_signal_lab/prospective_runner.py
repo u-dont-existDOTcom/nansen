@@ -18,6 +18,7 @@ from .evaluation import load_evaluation_manifest
 from .gpt_protocol import (
     GPTArtifactWriter,
     GPTPassResult,
+    admissible_evidence_paths,
     archive_model_preflight,
     run_pass1,
     run_pass2,
@@ -70,13 +71,20 @@ _DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pi
 _DESIGN_V3_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md"
 _DESIGN_V4_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md"
 _DESIGN_V5_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md"
+_DESIGN_V6_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-citation-enum-v6.md"
 _PROTOCOL_DESIGNS = {
     "strict-v1": _DESIGN_PATH,
     "account-baseline-v2": _DESIGN_V2_PATH,
     "completed-flow-v3": _DESIGN_V3_PATH,
     "contract-context-v4": _DESIGN_V4_PATH,
     "schema-subset-v5": _DESIGN_V5_PATH,
+    "citation-enum-v6": _DESIGN_V6_PATH,
 }
+_MODEL_SUCCESSOR_PROTOCOLS = {
+    "schema-subset-v5": _DESIGN_V4_PATH,
+    "citation-enum-v6": _DESIGN_V5_PATH,
+}
+_MODEL_SUCCESSOR_DESIGNS = frozenset({_DESIGN_V5_PATH, _DESIGN_V6_PATH})
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _EVIDENCE_TIMESTAMP_FIELDS = {
     "request_started_at",
@@ -245,10 +253,10 @@ def initialize_pilot(
     source = root / _SOURCE_PATH
     if protocol_version not in _PROTOCOL_DESIGNS:
         raise PilotError(f"unsupported prospective protocol: {protocol_version}")
-    is_model_successor = protocol_version == "schema-subset-v5"
+    is_model_successor = protocol_version in _MODEL_SUCCESSOR_PROTOCOLS
     if is_model_successor != (model_successor_source is not None):
         raise PilotError(
-            "schema-subset-v5 requires an exact model-successor source and no other protocol accepts one"
+            "model-successor protocols require an exact source and no other protocol accepts one"
         )
     if model_successor_source is not None:
         if set(model_successor_source) != _MODEL_SUCCESSOR_SOURCE_KEYS or any(
@@ -290,7 +298,7 @@ def initialize_pilot(
         preregistration_md = (
             "# GPT model-successor preregistration\n\n"
             "Status: preregistered; no new paid call or successor GPT inference has run.\n\n"
-            "This model-only successor reuses the exact sealed identity-blinded v4 "
+            "This model-only successor reuses the exact sealed identity-blinded source "
             "snapshot, makes zero Nansen requests, and ends after two validated "
             "`gpt-5.6-sol` passes are sealed. It is not a new prospective market "
             "observation and cannot establish advancement.\n\n"
@@ -458,16 +466,21 @@ def initialize_pilot(
 def _model_successor_source(
     experiment_root: Path,
     source_manifest: Path,
+    *,
+    protocol_version: str,
 ) -> tuple[ProspectiveBundle, dict[str, str]]:
     root = Path(os.path.abspath(os.fspath(experiment_root)))
     source = load_prospective_manifest(Path(source_manifest))
     verify_hash_chain(source)
     if source.root.parent.resolve() != root.parent.resolve():
         raise PilotError("model-successor source must be a direct sibling experiment")
+    if protocol_version not in _MODEL_SUCCESSOR_PROTOCOLS:
+        raise PilotError("unsupported model-successor protocol")
     if source.manifest["stage"] != "unscorable":
-        raise PilotError("model-successor source must be a terminal unscorable v4 bundle")
-    if source.manifest["design_path"] != _DESIGN_V4_PATH:
-        raise PilotError("model-successor source must use contract-context-v4")
+        raise PilotError("model-successor source must be terminally unscorable")
+    expected_design = _MODEL_SUCCESSOR_PROTOCOLS[protocol_version]
+    if source.manifest["design_path"] != expected_design:
+        raise PilotError("model-successor source uses the wrong predecessor protocol")
 
     artifacts = {
         item["path"]: item
@@ -517,15 +530,20 @@ def initialize_model_successor(
     *,
     source_manifest: Path,
     created_at: datetime,
+    protocol_version: str = "schema-subset-v5",
 ) -> ProspectiveBundle:
-    """Preregister and adopt one exact sealed v4 snapshot without provider calls."""
+    """Preregister and adopt one exact sealed predecessor snapshot without calls."""
 
     root = Path(os.path.abspath(os.fspath(experiment_root)))
-    source, descriptor = _model_successor_source(root, Path(source_manifest))
+    source, descriptor = _model_successor_source(
+        root,
+        Path(source_manifest),
+        protocol_version=protocol_version,
+    )
     bundle = initialize_pilot(
         root,
         created_at=created_at,
-        protocol_version="schema-subset-v5",
+        protocol_version=protocol_version,
         model_successor_source=descriptor,
     )
     try:
@@ -1202,7 +1220,10 @@ def _seal_decision(
     decision_artifacts: list[Path] = []
     writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
     already_sealed = {item["path"] for item in current.manifest["artifacts"]}
+    exact_evidence_paths = current.manifest["design_path"] == _DESIGN_V6_PATH
     try:
+        if exact_evidence_paths:
+            admissible_evidence_paths(blinded)
         archive_model_preflight(openai, writer)
         decision_artifacts.extend(
             path
@@ -1230,11 +1251,23 @@ def _seal_decision(
             clock=clock,
         )
         decision_artifacts.append(comparator_path)
-        pass1 = run_pass1(openai, snapshot_path, writer)
-        pass2 = run_pass2(openai, snapshot_path, pass1, theory_records, writer)
+        pass1 = run_pass1(
+            openai,
+            snapshot_path,
+            writer,
+            exact_evidence_paths=exact_evidence_paths,
+        )
+        pass2 = run_pass2(
+            openai,
+            snapshot_path,
+            pass1,
+            theory_records,
+            writer,
+            exact_evidence_paths=exact_evidence_paths,
+        )
         decision_artifacts.extend(_model_paths(current.root, "pass-1"))
         decision_artifacts.extend(_model_paths(current.root, "pass-2"))
-        if current.manifest["design_path"] == _DESIGN_V5_PATH:
+        if current.manifest["design_path"] in _MODEL_SUCCESSOR_DESIGNS:
             model_result = _install_bytes(
                 current.root / "MODEL-RESULT.md",
                 _render_model_result(pass1, pass2),
@@ -1324,7 +1357,7 @@ def start_pilot(
     if current.manifest["stage"] not in {"preregistered", "snapshot_collected"}:
         raise PilotError(f"pilot-start cannot run from {current.manifest['stage']}")
     if (
-        current.manifest["design_path"] == _DESIGN_V5_PATH
+        current.manifest["design_path"] in _MODEL_SUCCESSOR_DESIGNS
         and current.manifest["stage"] == "preregistered"
     ):
         raise PilotError(
@@ -1712,7 +1745,7 @@ def settle_pilot(
     clock: Callable[[], datetime],
 ) -> ProspectiveBundle:
     current = recover_stage_transaction(load_prospective_manifest(bundle.manifest_path))
-    if current.manifest["design_path"] == _DESIGN_V5_PATH:
+    if current.manifest["design_path"] in _MODEL_SUCCESSOR_DESIGNS:
         raise PilotError("model-only successor does not authorize settlement")
     if current.manifest["stage"] in {"settled", "unscorable"}:
         return current
