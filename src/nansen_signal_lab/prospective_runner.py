@@ -68,10 +68,12 @@ _SOURCE_PATH = "../2026-08-17-paper-strategy-feasibility/manifest.json"
 _DESIGN_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md"
 _DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md"
 _DESIGN_V3_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md"
+_DESIGN_V4_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md"
 _PROTOCOL_DESIGNS = {
     "strict-v1": _DESIGN_PATH,
     "account-baseline-v2": _DESIGN_V2_PATH,
     "completed-flow-v3": _DESIGN_V3_PATH,
+    "contract-context-v4": _DESIGN_V4_PATH,
 }
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _EVIDENCE_TIMESTAMP_FIELDS = {
@@ -1137,10 +1139,15 @@ def start_pilot(
     matched_openapi_sha256 = _sha256_bytes(openapi_raw)
     account_baseline_version = (
         "account-baseline-v2"
-        if current.manifest["design_path"] in {_DESIGN_V2_PATH, _DESIGN_V3_PATH}
+        if current.manifest["design_path"]
+        in {_DESIGN_V2_PATH, _DESIGN_V3_PATH, _DESIGN_V4_PATH}
         else None
     )
-    completed_flow_range = current.manifest["design_path"] == _DESIGN_V3_PATH
+    completed_flow_range = current.manifest["design_path"] in {
+        _DESIGN_V3_PATH,
+        _DESIGN_V4_PATH,
+    }
+    contract_v4_context = current.manifest["design_path"] == _DESIGN_V4_PATH
 
     writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
     try:
@@ -1298,6 +1305,7 @@ def start_pilot(
             selection,
             *(_snapshot_body(response) for response in responses),
             available_at=available_at,
+            contract_v4_context=contract_v4_context,
         )
         blinded = blind_snapshot(normalized)
     except Exception as exc:

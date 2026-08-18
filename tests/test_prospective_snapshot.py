@@ -289,6 +289,117 @@ def test_normalization_rejects_incomplete_late_or_nonfinal_flow_evidence():
             )
 
 
+def test_v4_context_normalizes_documented_nested_and_singleton_shapes():
+    snapshot = _snapshot_module()
+    available_at = datetime(2026, 8, 17, 10, tzinfo=timezone.utc)
+    valid_rows = [_flow_row(hour) for hour in range(13)]
+    token_information = {
+        "data": {
+            "contract_address": "So111",
+            "name": "LEAK",
+            "symbol": "LEAK",
+            "spot_metrics": {
+                "volume_total_usd": 1000.0,
+                "buy_volume_usd": 600.0,
+                "sell_volume_usd": 400.0,
+                "total_buys": 12,
+                "total_sells": 8,
+                "unique_buyers": 10,
+                "unique_sellers": 7,
+                "liquidity_usd": 250000.0,
+                "total_holders": 99,
+            },
+            "token_details": {
+                "market_cap_usd": 1000000.0,
+                "fdv_usd": 1200000.0,
+                "circulating_supply": 800000.0,
+                "total_supply": 1000000.0,
+                "website": "https://identity.invalid",
+                "x": "identity",
+            },
+        },
+        "warnings": None,
+    }
+    flow_record = {
+        "smart_trader_net_flow_usd": 25.0,
+        "smart_trader_avg_flow_usd": 5.0,
+        "smart_trader_wallet_count": 4,
+        "exchange_net_flow_usd": -10.0,
+        "unknown_metric": 999,
+    }
+    normalized = snapshot.normalize_snapshot(
+        _selection(snapshot),
+        token_information,
+        {"data": [flow_record], "warnings": ["provider warning"]},
+        _final_flow_body(valid_rows),
+        {**_final_flow_body(valid_rows), "warnings": None},
+        available_at=available_at,
+        contract_v4_context=True,
+    )
+
+    assert normalized["token_information"]["data"] == {
+        "buy_count": 12,
+        "buy_volume_usd": 600.0,
+        "circulating_supply": 800000.0,
+        "fdv_usd": 1200000.0,
+        "holders_count": 99,
+        "liquidity_usd": 250000.0,
+        "market_cap_usd": 1000000.0,
+        "sell_count": 8,
+        "sell_volume_usd": 400.0,
+        "total_supply": 1000000.0,
+        "unique_buyers": 10,
+        "unique_sellers": 7,
+        "volume_usd": 1000.0,
+    }
+    assert normalized["flow_intelligence"]["data"] == {
+        "exchange_net_flow_usd": -10.0,
+        "smart_trader_avg_flow_usd": 5.0,
+        "smart_trader_net_flow_usd": 25.0,
+        "smart_trader_wallet_count": 4,
+    }
+    assert normalized["token_information"]["warnings"] == {
+        "present": False, "count": 0,
+    }
+    assert normalized["flow_intelligence"]["warnings"] == {
+        "present": True, "count": 1,
+    }
+    serialized = json.dumps(snapshot.blind_snapshot(normalized), sort_keys=True)
+    for forbidden in ("LEAK", "So111", "identity.invalid", "unknown_metric"):
+        assert forbidden not in serialized
+
+
+@pytest.mark.parametrize("data", [[], [{}, {}], {}, ["not-an-object"]])
+def test_v4_context_rejects_non_singleton_flow_intelligence(data):
+    snapshot = _snapshot_module()
+    valid_rows = [_flow_row(hour) for hour in range(13)]
+    with pytest.raises(snapshot.SnapshotError, match="exactly one object"):
+        snapshot.normalize_snapshot(
+            _selection(snapshot),
+            {"data": {"spot_metrics": {}, "token_details": {}}},
+            {"data": data},
+            _final_flow_body(valid_rows),
+            _final_flow_body(valid_rows),
+            available_at=datetime(2026, 8, 17, 10, tzinfo=timezone.utc),
+            contract_v4_context=True,
+        )
+
+
+def test_v4_context_rejects_malformed_warnings():
+    snapshot = _snapshot_module()
+    valid_rows = [_flow_row(hour) for hour in range(13)]
+    with pytest.raises(snapshot.SnapshotError, match="warnings"):
+        snapshot.normalize_snapshot(
+            _selection(snapshot),
+            {"data": {"spot_metrics": {}, "token_details": {}}, "warnings": "bad"},
+            {"data": [{}]},
+            _final_flow_body(valid_rows),
+            _final_flow_body(valid_rows),
+            available_at=datetime(2026, 8, 17, 10, tzinfo=timezone.utc),
+            contract_v4_context=True,
+        )
+
+
 def test_normalization_rejects_space_separated_bucket_end_timestamp():
     snapshot = _snapshot_module()
     available_at = datetime(2026, 8, 17, 10, tzinfo=timezone.utc)

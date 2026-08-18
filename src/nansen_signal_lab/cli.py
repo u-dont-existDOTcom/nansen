@@ -376,7 +376,12 @@ def build_parser():
     s.add_argument("--experiment-dir", required=True)
     s.add_argument(
         "--protocol-version",
-        choices=("strict-v1", "account-baseline-v2", "completed-flow-v3"),
+        choices=(
+            "strict-v1",
+            "account-baseline-v2",
+            "completed-flow-v3",
+            "contract-context-v4",
+        ),
         default="strict-v1",
     )
     s.set_defaults(func=cmd_pilot_init)

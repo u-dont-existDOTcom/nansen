@@ -57,6 +57,44 @@ _CONTEXT_METRICS = frozenset({
     "outflow_usd", "buy_volume_usd", "sell_volume_usd", "buy_count", "sell_count",
     "trader_count", "smart_money_trader_count",
 })
+_V4_TOKEN_METRICS = {
+    "spot_metrics": {
+        "volume_total_usd": "volume_usd",
+        "buy_volume_usd": "buy_volume_usd",
+        "sell_volume_usd": "sell_volume_usd",
+        "total_buys": "buy_count",
+        "total_sells": "sell_count",
+        "unique_buyers": "unique_buyers",
+        "unique_sellers": "unique_sellers",
+        "liquidity_usd": "liquidity_usd",
+        "total_holders": "holders_count",
+    },
+    "token_details": {
+        "market_cap_usd": "market_cap_usd",
+        "fdv_usd": "fdv_usd",
+        "circulating_supply": "circulating_supply",
+        "total_supply": "total_supply",
+    },
+}
+_V4_FLOW_INTELLIGENCE_METRICS = frozenset({
+    f"{segment}_{metric}"
+    for segment in (
+        "public_figure",
+        "top_pnl",
+        "whale",
+        "smart_trader",
+        "exchange",
+        "fresh_wallets",
+    )
+    for metric in ("net_flow_usd", "avg_flow_usd", "wallet_count")
+})
+_CONTEXT_METRICS = _CONTEXT_METRICS | _V4_FLOW_INTELLIGENCE_METRICS | frozenset({
+    "unique_buyers",
+    "unique_sellers",
+    "fdv_usd",
+    "circulating_supply",
+    "total_supply",
+})
 
 
 def _utc(value: datetime, *, field: str) -> datetime:
@@ -328,8 +366,12 @@ def _freshness(response: dict[str, Any]) -> dict[str, Any]:
 
 def _warnings(response: dict[str, Any]) -> dict[str, Any]:
     warnings = response.get("warnings", [])
-    if not isinstance(warnings, list):
-        raise SnapshotError("response warnings must be a list")
+    if warnings is None:
+        warnings = []
+    if not isinstance(warnings, list) or any(
+        not isinstance(item, str) for item in warnings
+    ):
+        raise SnapshotError("response warnings must be null or a list of strings")
     return {"present": bool(warnings), "count": len(warnings)}
 
 
@@ -350,6 +392,60 @@ def _context_section(response: Any, *, label: str) -> dict[str, Any]:
     return {"data": metrics, "freshness": _freshness(response), "warnings": _warnings(response)}
 
 
+def _v4_numeric(value: Any, *, field: str) -> int | float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value):
+        raise SnapshotError(f"{field} must be a finite number")
+    return value
+
+
+def _v4_token_information(response: Any) -> dict[str, Any]:
+    if not isinstance(response, dict) or not isinstance(response.get("data"), dict):
+        raise SnapshotError("token_information response data must be an object")
+    data = response["data"]
+    metrics: dict[str, int | float] = {}
+    for section_name, mapping in _V4_TOKEN_METRICS.items():
+        section = data.get(section_name, {})
+        if not isinstance(section, dict):
+            raise SnapshotError(
+                f"token_information {section_name} must be an object"
+            )
+        for source_name, target_name in mapping.items():
+            if source_name in section:
+                metrics[target_name] = _v4_numeric(
+                    section[source_name],
+                    field=f"token_information {section_name}.{source_name}",
+                )
+    return {
+        "data": metrics,
+        "freshness": _freshness(response),
+        "warnings": _warnings(response),
+    }
+
+
+def _v4_flow_intelligence(response: Any) -> dict[str, Any]:
+    data = response.get("data") if isinstance(response, dict) else None
+    if (
+        not isinstance(response, dict)
+        or not isinstance(data, list)
+        or len(data) != 1
+        or not isinstance(data[0], dict)
+    ):
+        raise SnapshotError(
+            "flow_intelligence response data must contain exactly one object"
+        )
+    record = data[0]
+    metrics = {
+        name: _v4_numeric(record[name], field=f"flow_intelligence {name}")
+        for name in sorted(_V4_FLOW_INTELLIGENCE_METRICS)
+        if name in record
+    }
+    return {
+        "data": metrics,
+        "freshness": _freshness(response),
+        "warnings": _warnings(response),
+    }
+
+
 def _flow_row_whitelist(row: dict[str, Any]) -> dict[str, Any]:
     return {field: row.get(field) for field in _FLOW_FIELDS if field in row}
 
@@ -362,11 +458,14 @@ def normalize_snapshot(
     exchange_flows: dict[str, Any],
     *,
     available_at: datetime,
+    contract_v4_context: bool = False,
 ) -> dict[str, Any]:
     """Normalize strict pre-decision evidence without bridging gaps or leaking identity."""
     available = _utc(available_at, field="available_at")
     if not isinstance(selection, dict):
         raise SnapshotError("selection must be an object")
+    if not isinstance(contract_v4_context, bool):
+        raise SnapshotError("contract_v4_context must be a boolean")
     try:
         identity = selection["identity"]
         notional = selection["notional"]
@@ -416,6 +515,16 @@ def normalize_snapshot(
             (feature for feature in features if _timestamp(feature["timestamp"], field="feature timestamp") == prior_time),
             None,
         )
+    if contract_v4_context:
+        token_information_section = _v4_token_information(token_information)
+        flow_intelligence_section = _v4_flow_intelligence(flow_intelligence)
+    else:
+        token_information_section = _context_section(
+            token_information, label="token_information"
+        )
+        flow_intelligence_section = _context_section(
+            flow_intelligence, label="flow_intelligence"
+        )
     return {
         "schema_version": 1,
         "candidate": {"chain": identity["chain"]},
@@ -425,8 +534,8 @@ def normalize_snapshot(
             "virtual_notional_usd": float(notional["virtual_notional_usd"]),
             "screener_liquidity_usd": float(liquidity["screener_liquidity_usd"]),
         },
-        "token_information": _context_section(token_information, label="token_information"),
-        "flow_intelligence": _context_section(flow_intelligence, label="flow_intelligence"),
+        "token_information": token_information_section,
+        "flow_intelligence": flow_intelligence_section,
         "smart_money": {
             "feature_set_version": SUPPORTED_FEATURE_SET,
             "raw_row_count": len(smart_rows),

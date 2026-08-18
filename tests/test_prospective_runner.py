@@ -26,6 +26,7 @@ def _repo(tmp_path: Path) -> Path:
         "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-design.md",
         "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md",
+        "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md",
         "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
     ):
         target = repo / relative
@@ -503,6 +504,83 @@ def test_v3_runner_uses_completed_hour_range_for_both_flow_labels(tmp_path):
             "to": "2026-08-17T09:59:59.999999Z",
         },
     ]
+
+
+def test_v4_runner_accepts_live_contract_context_shapes(tmp_path):
+    from dataclasses import replace
+    from src.nansen_signal_lab.prospective_runner import initialize_pilot, start_pilot
+
+    class V4Nansen(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            body = response.body
+            if endpoint == "account":
+                return replace(
+                    response,
+                    response_headers={
+                        "X-Request-Id": caller_request_id,
+                        "X-Nansen-Credits-Cost": "0",
+                    },
+                    credit_used=None,
+                    credit_remaining=None,
+                )
+            if endpoint == "tgm/token-information":
+                body = {
+                    "data": {
+                        "contract_address": "So111",
+                        "name": "LEAK",
+                        "spot_metrics": {
+                            "volume_total_usd": 1000.0,
+                            "liquidity_usd": 250000.0,
+                            "total_holders": 99,
+                        },
+                        "token_details": {"market_cap_usd": 1000000.0},
+                    },
+                    "warnings": None,
+                }
+            elif endpoint == "tgm/flow-intelligence":
+                body = {
+                    "data": [{
+                        "smart_trader_net_flow_usd": 25.0,
+                        "smart_trader_wallet_count": 4,
+                    }],
+                    "warnings": ["provider warning"],
+                }
+            elif endpoint == "tgm/flows" and payload["label"] == "exchange":
+                body = dict(body, warnings=None)
+            else:
+                return response
+            raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+            return replace(response, body=body, raw_body=raw)
+
+    bundle = initialize_pilot(
+        _repo(tmp_path) / "research/experiments/contract-context-v4-prospective",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+        protocol_version="contract-context-v4",
+    )
+    decision = start_pilot(
+        bundle,
+        nansen=V4Nansen(),
+        openai=FakeOpenAI(),
+        clock=lambda: datetime(2026, 8, 17, 10, 37, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+
+    assert decision.manifest["stage"] == "decision_sealed"
+    normalized = json.loads((decision.root / "normalized/snapshot.json").read_text())
+    assert normalized["token_information"]["data"] == {
+        "holders_count": 99,
+        "liquidity_usd": 250000.0,
+        "market_cap_usd": 1000000.0,
+        "volume_usd": 1000.0,
+    }
+    assert normalized["flow_intelligence"]["data"] == {
+        "smart_trader_net_flow_usd": 25.0,
+        "smart_trader_wallet_count": 4,
+    }
+    assert normalized["exchange"]["warnings"] == {"count": 0, "present": False}
 
 
 def test_full_fake_lifecycle_uses_exact_billable_calls_and_replays_offline(tmp_path):
