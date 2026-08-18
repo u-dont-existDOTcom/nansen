@@ -76,6 +76,16 @@ class FakeClient:
         return result
 
 
+def _schema_keywords(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key
+            yield from _schema_keywords(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _schema_keywords(child)
+
+
 def _writer(tmp_path):
     from src.nansen_signal_lab.gpt_protocol import GPTArtifactWriter
 
@@ -116,6 +126,29 @@ def test_pass1_archives_exact_bytes_and_binds_exact_snapshot_hash(tmp_path):
     assert final["snapshot_sha256"] == expected_snapshot_sha
     assert final["request_sha256"] == result.request_sha256
     assert final["response_sha256"] == result.response_sha256
+
+
+def test_strict_provider_schemas_omit_unsupported_unique_items(tmp_path):
+    from src.nansen_signal_lab.gpt_protocol import PASS1_SCHEMA, PASS2_SCHEMA, run_pass1
+
+    assert "uniqueItems" not in set(_schema_keywords(PASS1_SCHEMA))
+    assert "uniqueItems" not in set(_schema_keywords(PASS2_SCHEMA))
+
+    client = FakeClient(
+        _response(
+            _pass1_value(evidence_for=[
+                "smart_money.final_feature.holdings_change_1h_pct",
+                "smart_money.final_feature.holdings_change_1h_pct",
+            ]),
+            response_id="duplicate",
+        ),
+        _response(_pass1_value(), response_id="repaired"),
+    )
+    run_pass1(client, _snapshot(tmp_path / "snapshot.json"), _writer(tmp_path))
+    assert len(client.calls) == 2
+    assert "must not contain duplicates" in " ".join(
+        client.calls[1]["input_json"]["repair"]["validation_errors"]
+    )
 
 
 @pytest.mark.parametrize(

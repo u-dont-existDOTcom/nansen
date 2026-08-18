@@ -15,6 +15,7 @@ from .client import NansenClient
 from .openai_client import OpenAIClient
 from .prospective_runner import (
     check_pilot,
+    initialize_model_successor,
     initialize_pilot,
     replay_pilot,
     settle_pilot,
@@ -263,11 +264,22 @@ def cmd_evaluate(args):
 
 
 def cmd_pilot_init(args):
-    bundle = initialize_pilot(
-        Path(args.experiment_dir),
-        created_at=datetime.now(timezone.utc),
-        protocol_version=args.protocol_version,
-    )
+    if args.protocol_version == "schema-subset-v5":
+        if not args.source_manifest:
+            raise ValueError("schema-subset-v5 requires --source-manifest")
+        bundle = initialize_model_successor(
+            Path(args.experiment_dir),
+            source_manifest=Path(args.source_manifest),
+            created_at=datetime.now(timezone.utc),
+        )
+    else:
+        if args.source_manifest:
+            raise ValueError("--source-manifest is only valid for schema-subset-v5")
+        bundle = initialize_pilot(
+            Path(args.experiment_dir),
+            created_at=datetime.now(timezone.utc),
+            protocol_version=args.protocol_version,
+        )
     print(f"initialized: {bundle.manifest_path}")
     print(f"stage: {bundle.manifest['stage']}")
 
@@ -381,9 +393,11 @@ def build_parser():
             "account-baseline-v2",
             "completed-flow-v3",
             "contract-context-v4",
+            "schema-subset-v5",
         ),
         default="strict-v1",
     )
+    s.add_argument("--source-manifest")
     s.set_defaults(func=cmd_pilot_init)
 
     s = sub.add_parser("pilot-start", help="collect and seal the prospective decision")

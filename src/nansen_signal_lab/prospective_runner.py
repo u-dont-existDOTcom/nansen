@@ -69,11 +69,13 @@ _DESIGN_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot
 _DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md"
 _DESIGN_V3_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md"
 _DESIGN_V4_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md"
+_DESIGN_V5_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md"
 _PROTOCOL_DESIGNS = {
     "strict-v1": _DESIGN_PATH,
     "account-baseline-v2": _DESIGN_V2_PATH,
     "completed-flow-v3": _DESIGN_V3_PATH,
     "contract-context-v4": _DESIGN_V4_PATH,
+    "schema-subset-v5": _DESIGN_V5_PATH,
 }
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _EVIDENCE_TIMESTAMP_FIELDS = {
@@ -81,6 +83,17 @@ _EVIDENCE_TIMESTAMP_FIELDS = {
     "response_retrieved_at",
     "provider_created_at",
     "artifact_written_at",
+}
+_MODEL_SUCCESSOR_SOURCE_KEYS = {
+    "experiment_id",
+    "manifest_path",
+    "manifest_sha256",
+    "snapshot_path",
+    "snapshot_sha256",
+    "selection_path",
+    "selection_sha256",
+    "snapshot_seal_path",
+    "snapshot_seal_sha256",
 }
 
 
@@ -218,6 +231,7 @@ def initialize_pilot(
     *,
     created_at: datetime,
     protocol_version: str = "strict-v1",
+    model_successor_source: dict[str, str] | None = None,
 ) -> ProspectiveBundle:
     root = Path(os.path.abspath(os.fspath(experiment_root)))
     created = _utc(created_at, field="created_at")
@@ -231,6 +245,28 @@ def initialize_pilot(
     source = root / _SOURCE_PATH
     if protocol_version not in _PROTOCOL_DESIGNS:
         raise PilotError(f"unsupported prospective protocol: {protocol_version}")
+    is_model_successor = protocol_version == "schema-subset-v5"
+    if is_model_successor != (model_successor_source is not None):
+        raise PilotError(
+            "schema-subset-v5 requires an exact model-successor source and no other protocol accepts one"
+        )
+    if model_successor_source is not None:
+        if set(model_successor_source) != _MODEL_SUCCESSOR_SOURCE_KEYS or any(
+            not isinstance(value, str) or not value
+            for value in model_successor_source.values()
+        ):
+            raise PilotError("model-successor source has an invalid shape")
+        for field in (
+            "manifest_sha256",
+            "snapshot_sha256",
+            "selection_sha256",
+            "snapshot_seal_sha256",
+        ):
+            value = model_successor_source[field]
+            if len(value) != 64 or any(
+                character not in "0123456789abcdef" for character in value
+            ):
+                raise PilotError(f"model-successor {field} must be a lowercase SHA-256")
     design_path = _PROTOCOL_DESIGNS[protocol_version]
     design = root / design_path
     contract = root / _CONTRACT_PATH
@@ -249,16 +285,31 @@ def initialize_pilot(
     openapi_sha256 = contract_value.get("source_sha256")
     if not isinstance(openapi_sha256, str) or len(openapi_sha256) != 64:
         raise PilotError("pinned Nansen contract lacks the full OpenAPI SHA-256")
-    preregistration_md = (
-        "# Prospective GPT pilot preregistration\n\n"
-        "Status: preregistered; no paid call or GPT inference has run.\n\n"
-        "The identity-blinded two-pass `gpt-5.6-sol` decision is compared with all "
-        "six frozen records on one common four-hour paper outcome. A tie is not a "
-        "win; unavailable comparison evidence is not zero. This is a one-token, "
-        "one-observation pilot and cannot establish advancement.\n\n"
-        f"Protocol: `{protocol_version}`.\n\n"
-        f"Design: `{design_path}`.\n"
-    ).encode("utf-8")
+    if is_model_successor:
+        assert model_successor_source is not None
+        preregistration_md = (
+            "# GPT model-successor preregistration\n\n"
+            "Status: preregistered; no new paid call or successor GPT inference has run.\n\n"
+            "This model-only successor reuses the exact sealed identity-blinded v4 "
+            "snapshot, makes zero Nansen requests, and ends after two validated "
+            "`gpt-5.6-sol` passes are sealed. It is not a new prospective market "
+            "observation and cannot establish advancement.\n\n"
+            f"Source manifest SHA-256: `{model_successor_source['manifest_sha256']}`.\n\n"
+            f"Source snapshot SHA-256: `{model_successor_source['snapshot_sha256']}`.\n\n"
+            f"Protocol: `{protocol_version}`.\n\n"
+            f"Design: `{design_path}`.\n"
+        ).encode("utf-8")
+    else:
+        preregistration_md = (
+            "# Prospective GPT pilot preregistration\n\n"
+            "Status: preregistered; no paid call or GPT inference has run.\n\n"
+            "The identity-blinded two-pass `gpt-5.6-sol` decision is compared with all "
+            "six frozen records on one common four-hour paper outcome. A tie is not a "
+            "win; unavailable comparison evidence is not zero. This is a one-token, "
+            "one-observation pilot and cannot establish advancement.\n\n"
+            f"Protocol: `{protocol_version}`.\n\n"
+            f"Design: `{design_path}`.\n"
+        ).encode("utf-8")
     preregistration_text = _install_bytes(
         root / "PREREGISTRATION.md",
         preregistration_md,
@@ -277,52 +328,85 @@ def initialize_pilot(
             "reasoning_effort": "high",
             "tools": [],
         },
-        "selection": {
-            "page": 1,
-            "rule": "page-local highest eligible Smart-Money netflow",
-            "screener_request": screener_payload(),
-            "virtual_notional": "min(1000, 0.001 * screener_liquidity_usd)",
-            "prior_cohort_excluded": True,
-        },
+        "selection": (
+            {
+                "rule": "reuse exact sealed source selection and blind snapshot bytes",
+                "new_nansen_selection": False,
+            }
+            if is_model_successor
+            else {
+                "page": 1,
+                "rule": "page-local highest eligible Smart-Money netflow",
+                "screener_request": screener_payload(),
+                "virtual_notional": "min(1000, 0.001 * screener_liquidity_usd)",
+                "prior_cohort_excluded": True,
+            }
+        ),
         "frozen_comparators": {
             "record_count": 6,
             "source_strategy_manifest_sha256": source_sha256,
             "paired_distribution_veto": True,
         },
-        "budget": {"max_nansen_calls": 10, "max_nansen_credits": 10},
+        "budget": {
+            "max_nansen_calls": 10,
+            "max_nansen_credits": 10,
+            "planned_nansen_calls": 0 if is_model_successor else "up to ceiling",
+        },
         "nansen_openapi_source_sha256": openapi_sha256,
-        "lifecycle": {
-            "stages": [
-                "preregistered",
-                "snapshot_collected",
-                "decision_sealed",
-                "entry_observed",
-                "settled",
-            ],
-            "terminal_failure_stage": "unscorable",
-            "earliest_settlement": (
-                "first UTC five-minute boundary after exit_window.to plus 60 seconds"
-            ),
-        },
-        "execution": {
-            "entry_window": "[t0+5m,t0+10m)",
-            "exit_window": "[entry_start+4h,entry_start+4h+5m)",
-            "paper_only": True,
-            "orders_or_wallet_actions": False,
-        },
-        "scoring": {
-            "fill_source": "common observed DEX trades",
-            "unfilled_is_zero": False,
-            "unavailable_is_zero": False,
-            "cash_benchmark_return": 0.0,
-            "strict_win": (
-                "Pass 2 net return is strictly greater than every applicable "
-                "scorable frozen comparator"
-            ),
-            "ties_are_wins": False,
-        },
+        "lifecycle": (
+            {
+                "stages": ["preregistered", "snapshot_collected", "decision_sealed"],
+                "successful_terminal_stage": "decision_sealed",
+                "terminal_failure_stage": "unscorable",
+            }
+            if is_model_successor
+            else {
+                "stages": [
+                    "preregistered",
+                    "snapshot_collected",
+                    "decision_sealed",
+                    "entry_observed",
+                    "settled",
+                ],
+                "terminal_failure_stage": "unscorable",
+                "earliest_settlement": (
+                    "first UTC five-minute boundary after exit_window.to plus 60 seconds"
+                ),
+            }
+        ),
+        "execution": (
+            {
+                "settlement_authorized": False,
+                "nansen_requests_authorized": False,
+                "orders_or_wallet_actions": False,
+            }
+            if is_model_successor
+            else {
+                "entry_window": "[t0+5m,t0+10m)",
+                "exit_window": "[entry_start+4h,entry_start+4h+5m)",
+                "paper_only": True,
+                "orders_or_wallet_actions": False,
+            }
+        ),
+        "scoring": (
+            {"authorized": False, "reason": "model-protocol test only"}
+            if is_model_successor
+            else {
+                "fill_source": "common observed DEX trades",
+                "unfilled_is_zero": False,
+                "unavailable_is_zero": False,
+                "cash_benchmark_return": 0.0,
+                "strict_win": (
+                    "Pass 2 net return is strictly greater than every applicable "
+                    "scorable frozen comparator"
+                ),
+                "ties_are_wins": False,
+            }
+        ),
         "headline_rule": (
-            "Pass 2 must be strictly greater than every applicable scorable frozen "
+            "No performance headline: model-protocol result only."
+            if is_model_successor
+            else "Pass 2 must be strictly greater than every applicable scorable frozen "
             "comparator; ties are not wins and unavailable baselines are unscorable."
         ),
         "preregistration_markdown": {
@@ -330,16 +414,25 @@ def initialize_pilot(
             "sha256": _sha256_file(preregistration_text),
         },
     }
+    if model_successor_source is not None:
+        preregistration["model_successor_source"] = dict(model_successor_source)
     preregistration_path = _install_json(
         root / "preregistration.json", preregistration, kind="preregistration"
     )
     manifest = {
         "schema_version": 4,
         "experiment_id": experiment_id,
-        "title": "Prospective identity-blinded GPT signal pilot",
+        "title": (
+            "Identity-blinded GPT model-protocol successor"
+            if is_model_successor
+            else "Prospective identity-blinded GPT signal pilot"
+        ),
         "created_at": timestamp,
         "hypothesis": (
-            "A sealed identity-blinded GPT decision can be compared prospectively "
+            "The corrected strict schema permits two validated gpt-5.6-sol passes "
+            "over the exact sealed v4 blind snapshot."
+            if is_model_successor
+            else "A sealed identity-blinded GPT decision can be compared prospectively "
             "with frozen deterministic strategies using common observed paper fills."
         ),
         "stage": "preregistered",
@@ -360,6 +453,125 @@ def initialize_pilot(
     _install_json(manifest_path, manifest, kind="prospective_manifest")
     BudgetGuard(root, max_calls=10, max_credits=10)
     return load_prospective_manifest(manifest_path)
+
+
+def _model_successor_source(
+    experiment_root: Path,
+    source_manifest: Path,
+) -> tuple[ProspectiveBundle, dict[str, str]]:
+    root = Path(os.path.abspath(os.fspath(experiment_root)))
+    source = load_prospective_manifest(Path(source_manifest))
+    verify_hash_chain(source)
+    if source.root.parent.resolve() != root.parent.resolve():
+        raise PilotError("model-successor source must be a direct sibling experiment")
+    if source.manifest["stage"] != "unscorable":
+        raise PilotError("model-successor source must be a terminal unscorable v4 bundle")
+    if source.manifest["design_path"] != _DESIGN_V4_PATH:
+        raise PilotError("model-successor source must use contract-context-v4")
+
+    artifacts = {
+        item["path"]: item
+        for item in source.manifest["artifacts"]
+        if item["stage"] == "snapshot_collected"
+    }
+    required = ("normalized/snapshot.json", "derived/selection.json")
+    if any(path not in artifacts for path in required):
+        raise PilotError("model-successor source lacks sealed snapshot inputs")
+    snapshot_seals = [
+        item for item in source.manifest["seals"]
+        if item["stage"] == "snapshot_collected"
+    ]
+    if len(snapshot_seals) != 1:
+        raise PilotError("model-successor source lacks one exact snapshot seal")
+    snapshot_ref = artifacts["normalized/snapshot.json"]
+    selection_ref = artifacts["derived/selection.json"]
+    for reference in (snapshot_ref, selection_ref):
+        path = source.root / reference["path"]
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or _sha256_file(path) != reference["sha256"]
+        ):
+            raise PilotError("model-successor source input no longer matches its seal")
+    source_manifest_path = source.manifest_path.resolve()
+    relative_manifest = os.path.relpath(source_manifest_path, start=root).replace(
+        os.sep, "/"
+    )
+    seal_ref = snapshot_seals[0]
+    descriptor = {
+        "experiment_id": source.experiment_id,
+        "manifest_path": relative_manifest,
+        "manifest_sha256": _sha256_file(source_manifest_path),
+        "snapshot_path": snapshot_ref["path"],
+        "snapshot_sha256": snapshot_ref["sha256"],
+        "selection_path": selection_ref["path"],
+        "selection_sha256": selection_ref["sha256"],
+        "snapshot_seal_path": seal_ref["path"],
+        "snapshot_seal_sha256": seal_ref["sha256"],
+    }
+    return source, descriptor
+
+
+def initialize_model_successor(
+    experiment_root: Path,
+    *,
+    source_manifest: Path,
+    created_at: datetime,
+) -> ProspectiveBundle:
+    """Preregister and adopt one exact sealed v4 snapshot without provider calls."""
+
+    root = Path(os.path.abspath(os.fspath(experiment_root)))
+    source, descriptor = _model_successor_source(root, Path(source_manifest))
+    bundle = initialize_pilot(
+        root,
+        created_at=created_at,
+        protocol_version="schema-subset-v5",
+        model_successor_source=descriptor,
+    )
+    try:
+        preregistration = json.loads((bundle.root / "preregistration.json").read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PilotError("model-successor preregistration is unreadable") from exc
+    if preregistration.get("model_successor_source") != descriptor:
+        raise PilotError("model-successor source differs from preregistration")
+    if bundle.manifest["stage"] != "preregistered":
+        return bundle
+
+    snapshot_path = _install_bytes(
+        bundle.root / "normalized/snapshot.json",
+        (source.root / descriptor["snapshot_path"]).read_bytes(),
+        kind="adopted_blind_snapshot",
+    )
+    selection_path = _install_bytes(
+        bundle.root / "derived/selection.json",
+        (source.root / descriptor["selection_path"]).read_bytes(),
+        kind="adopted_selection",
+    )
+    pointer_path = _install_timestamped_json(
+        bundle.root / "derived/source-snapshot.json",
+        {"schema_version": 1, **descriptor},
+        kind="model_successor_source",
+        clock=lambda: _utc(created_at, field="created_at"),
+    )
+    if (
+        _sha256_file(snapshot_path) != descriptor["snapshot_sha256"]
+        or _sha256_file(selection_path) != descriptor["selection_sha256"]
+    ):
+        raise PilotError("adopted model-successor inputs differ from their source")
+    guard = BudgetGuard(bundle.root, 10, 10)
+    recorded_at = _stage_recorded_at(
+        guard,
+        "snapshot_collected",
+        clock=lambda: _utc(created_at, field="created_at"),
+    )
+    budget_snapshot = guard.snapshot("snapshot_collected", recorded_at=recorded_at)
+    return commit_stage(
+        bundle,
+        "snapshot_collected",
+        recorded_at,
+        (selection_path, pointer_path, snapshot_path),
+        budget_snapshot,
+    )
 
 
 def _nansen_paths(
@@ -955,6 +1167,25 @@ def _model_paths(root: Path, scope: str) -> tuple[Path, ...]:
     return tuple(sorted(path for path in directory.glob("*.json") if path.is_file()))
 
 
+def _render_model_result(pass1: GPTPassResult, pass2: GPTPassResult) -> bytes:
+    return (
+        "# GPT model-successor result\n\n"
+        "Status: two validated passes sealed.\n\n"
+        f"Model: `{pass2.returned_model_id}`  \n"
+        f"Snapshot SHA-256: `{pass2.snapshot_sha256}`  \n"
+        f"Pass 1 response SHA-256: `{pass1.response_sha256}`  \n"
+        f"Pass 2 response SHA-256: `{pass2.response_sha256}`\n\n"
+        f"Pass 1 action: `{pass1.value['action']}`  \n"
+        f"Pass 1 confidence: `{pass1.value['confidence']}`  \n"
+        f"Pass 1 expected direction: `{pass1.value['expected_direction_4h']}`  \n"
+        f"Pass 2 assessment: `{pass2.value['pass1_assessment']}`  \n"
+        f"Pass 2 final action: `{pass2.value['final_action']}`\n\n"
+        "This is a model-protocol result over an already sealed historical "
+        "snapshot. It is not a new prospective outcome, performance score, order, "
+        "wallet action, or venue submission.\n"
+    ).encode("utf-8")
+
+
 def _seal_decision(
     current: ProspectiveBundle,
     guard: BudgetGuard,
@@ -969,7 +1200,15 @@ def _seal_decision(
 ) -> ProspectiveBundle:
     source_path = (current.root / current.manifest["source_strategy_manifest"]).resolve()
     decision_artifacts: list[Path] = []
+    writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
+    already_sealed = {item["path"] for item in current.manifest["artifacts"]}
     try:
+        archive_model_preflight(openai, writer)
+        decision_artifacts.extend(
+            path
+            for path in _model_paths(current.root, "preflight")
+            if path.relative_to(current.root).as_posix() not in already_sealed
+        )
         theory_records = load_frozen_records(
             source_path, current.manifest["source_strategy_manifest_sha256"]
         )
@@ -991,14 +1230,24 @@ def _seal_decision(
             clock=clock,
         )
         decision_artifacts.append(comparator_path)
-        writer = GPTArtifactWriter(current.root, now=lambda: _clock_value(clock))
         pass1 = run_pass1(openai, snapshot_path, writer)
         pass2 = run_pass2(openai, snapshot_path, pass1, theory_records, writer)
         decision_artifacts.extend(_model_paths(current.root, "pass-1"))
         decision_artifacts.extend(_model_paths(current.root, "pass-2"))
+        if current.manifest["design_path"] == _DESIGN_V5_PATH:
+            model_result = _install_bytes(
+                current.root / "MODEL-RESULT.md",
+                _render_model_result(pass1, pass2),
+                kind="model_successor_result",
+            )
+            decision_artifacts.append(model_result)
     except Exception as exc:
-        decision_artifacts.extend(_model_paths(current.root, "pass-1"))
-        decision_artifacts.extend(_model_paths(current.root, "pass-2"))
+        for scope in ("preflight", "pass-1", "pass-2"):
+            decision_artifacts.extend(
+                path
+                for path in _model_paths(current.root, scope)
+                if path.relative_to(current.root).as_posix() not in already_sealed
+            )
         return _terminal_unscorable(
             current,
             guard,
@@ -1074,6 +1323,13 @@ def start_pilot(
         return current
     if current.manifest["stage"] not in {"preregistered", "snapshot_collected"}:
         raise PilotError(f"pilot-start cannot run from {current.manifest['stage']}")
+    if (
+        current.manifest["design_path"] == _DESIGN_V5_PATH
+        and current.manifest["stage"] == "preregistered"
+    ):
+        raise PilotError(
+            "model-only successor must adopt its sealed source snapshot before start"
+        )
     guard = BudgetGuard(current.root, 10, 10)
     guard.reconcile_inflight()
     if guard.replay().halted_reason is not None:
@@ -1456,6 +1712,8 @@ def settle_pilot(
     clock: Callable[[], datetime],
 ) -> ProspectiveBundle:
     current = recover_stage_transaction(load_prospective_manifest(bundle.manifest_path))
+    if current.manifest["design_path"] == _DESIGN_V5_PATH:
+        raise PilotError("model-only successor does not authorize settlement")
     if current.manifest["stage"] in {"settled", "unscorable"}:
         return current
     if current.manifest["stage"] not in {"decision_sealed", "entry_observed"}:

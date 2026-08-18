@@ -29,7 +29,6 @@ def _string_list_schema(*, maximum: int = 12) -> dict[str, Any]:
         "type": "array",
         "items": _string_schema(max_length=240),
         "maxItems": maximum,
-        "uniqueItems": True,
     }
 
 
@@ -70,7 +69,6 @@ PASS1_SCHEMA: dict[str, Any] = {
             "type": "array",
             "items": {"type": "string", "enum": list(RISK_FLAGS)},
             "maxItems": len(RISK_FLAGS),
-            "uniqueItems": True,
         },
     },
 }

@@ -111,7 +111,14 @@ _DESIGN_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot
 _DESIGN_V2_PATH = "../../../docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md"
 _DESIGN_V3_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md"
 _DESIGN_V4_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md"
-_DESIGN_PATHS = {_DESIGN_PATH, _DESIGN_V2_PATH, _DESIGN_V3_PATH, _DESIGN_V4_PATH}
+_DESIGN_V5_PATH = "../../../docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md"
+_DESIGN_PATHS = {
+    _DESIGN_PATH,
+    _DESIGN_V2_PATH,
+    _DESIGN_V3_PATH,
+    _DESIGN_V4_PATH,
+    _DESIGN_V5_PATH,
+}
 _CONTRACT_PATH = "../../../docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json"
 _HEX = frozenset("0123456789abcdef")
 _TIMESTAMP_FIELDS = {

@@ -27,6 +27,7 @@ def _repo(tmp_path: Path) -> Path:
         "docs/superpowers/specs/2026-08-17-gpt-prospective-pilot-account-baseline-v2.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-completed-flow-v3.md",
         "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-contract-context-v4.md",
+        "docs/superpowers/specs/2026-08-18-gpt-prospective-pilot-schema-subset-v5.md",
         "docs/superpowers/specs/2026-08-17-nansen-api-contract-snapshot.json",
     ):
         target = repo / relative
@@ -581,6 +582,127 @@ def test_v4_runner_accepts_live_contract_context_shapes(tmp_path):
         "smart_trader_wallet_count": 4,
     }
     assert normalized["exchange"]["warnings"] == {"count": 0, "present": False}
+
+
+def test_v5_reuses_exact_v4_snapshot_and_never_calls_nansen(tmp_path):
+    from dataclasses import replace
+
+    from src.nansen_signal_lab.budget import BudgetGuard
+    from src.nansen_signal_lab.openai_client import OpenAIEvidenceResponse, OpenAIError
+    from src.nansen_signal_lab.prospective_runner import (
+        PilotError,
+        check_pilot,
+        initialize_model_successor,
+        initialize_pilot,
+        replay_pilot,
+        settle_pilot,
+        start_pilot,
+    )
+
+    class LiveV4Nansen(FakeNansen):
+        def request_evidence(self, method, endpoint, payload, *, caller_request_id):
+            response = super().request_evidence(
+                method, endpoint, payload, caller_request_id=caller_request_id
+            )
+            body = response.body
+            if endpoint == "account":
+                return replace(
+                    response,
+                    response_headers={
+                        "X-Request-Id": caller_request_id,
+                        "X-Nansen-Credits-Cost": "0",
+                    },
+                    credit_used=None,
+                    credit_remaining=None,
+                )
+            if endpoint == "tgm/token-information":
+                body = {
+                    "data": {
+                        "spot_metrics": {
+                            "volume_total_usd": 1000.0,
+                            "liquidity_usd": 250000.0,
+                            "total_holders": 99,
+                        },
+                        "token_details": {"market_cap_usd": 1000000.0},
+                    },
+                    "warnings": None,
+                }
+            elif endpoint == "tgm/flow-intelligence":
+                body = {"data": [{"smart_trader_net_flow_usd": 25.0}]}
+            elif endpoint == "tgm/flows" and payload["label"] == "exchange":
+                body = dict(body, warnings=None)
+            else:
+                return response
+            raw = json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+            return replace(response, body=body, raw_body=raw)
+
+    class SchemaRejectingOpenAI(FakeOpenAI):
+        def create_structured(self, **kwargs):
+            self.calls.append(("structured", kwargs["schema_name"]))
+            response = OpenAIEvidenceResponse.from_raw(
+                raw_body=b'{"error":{"code":"invalid_json_schema"}}',
+                status_code=400,
+                request_started_at="2026-08-17T10:37:00Z",
+                response_retrieved_at="2026-08-17T10:37:01Z",
+                response_headers={"x-request-id": "schema-reject"},
+            )
+            raise OpenAIError("OpenAI HTTP 400", transmitted=True, response=response)
+
+    repo = _repo(tmp_path)
+    source = initialize_pilot(
+        repo / "research/experiments/source-v4-terminal",
+        created_at=datetime(2026, 8, 17, 9, tzinfo=timezone.utc),
+        protocol_version="contract-context-v4",
+    )
+    source = start_pilot(
+        source,
+        nansen=LiveV4Nansen(),
+        openai=SchemaRejectingOpenAI(),
+        clock=lambda: datetime(2026, 8, 17, 10, 38, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+    assert source.manifest["stage"] == "unscorable"
+    source_snapshot = source.root / "normalized/snapshot.json"
+    source_selection = source.root / "derived/selection.json"
+
+    successor = initialize_model_successor(
+        repo / "research/experiments/schema-subset-v5",
+        source_manifest=source.manifest_path,
+        created_at=datetime(2026, 8, 17, 11, tzinfo=timezone.utc),
+    )
+    assert successor.manifest["stage"] == "snapshot_collected"
+    assert (successor.root / "normalized/snapshot.json").read_bytes() == source_snapshot.read_bytes()
+    assert (successor.root / "derived/selection.json").read_bytes() == source_selection.read_bytes()
+    assert BudgetGuard(successor.root).replay().calls == 0
+
+    class NeverNansen:
+        def __getattr__(self, name):
+            raise AssertionError(f"Nansen must not be touched: {name}")
+
+    openai = FakeOpenAI()
+    decision = start_pilot(
+        successor,
+        nansen=NeverNansen(),
+        openai=openai,
+        clock=lambda: datetime(2026, 8, 17, 11, 1, tzinfo=timezone.utc),
+        sleep=lambda _seconds: None,
+    )
+    assert decision.manifest["stage"] == "decision_sealed"
+    assert openai.calls == [
+        ("preflight", "gpt-5.6-sol"),
+        ("structured", "prospective_pass_1"),
+        ("structured", "prospective_pass_2"),
+    ]
+    assert (decision.root / "MODEL-RESULT.md").is_file()
+    assert BudgetGuard(decision.root).replay().calls == 0
+    assert replay_pilot(decision)["nansen_credits"] == 0
+    assert decision.root / "MODEL-RESULT.md" in check_pilot(decision)
+    with pytest.raises(PilotError, match="model-only"):
+        settle_pilot(
+            decision,
+            nansen=NeverNansen(),
+            clock=lambda: datetime(2026, 8, 17, 16, tzinfo=timezone.utc),
+        )
 
 
 def test_full_fake_lifecycle_uses_exact_billable_calls_and_replays_offline(tmp_path):
