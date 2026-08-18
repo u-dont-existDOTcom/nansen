@@ -34,6 +34,15 @@ from .historical_discovery import (
     load_historical_manifest,
     start_historical_discovery,
 )
+from .historical_recovery import (
+    DESIGN_PATH as HISTORICAL_RECOVERY_DESIGN_PATH,
+    MAX_CALLS as HISTORICAL_RECOVERY_MAX_CALLS,
+    MAX_CREDITS as HISTORICAL_RECOVERY_MAX_CREDITS,
+    check_historical_recovery,
+    initialize_historical_recovery,
+    load_historical_recovery_manifest,
+    start_historical_recovery,
+)
 
 DEFAULT_CHAINS = ["solana", "ethereum", "base", "bnb", "arbitrum"]
 
@@ -383,6 +392,48 @@ def cmd_historical_check(args):
         print(f"verified: {path}")
 
 
+def cmd_historical_recovery_init(args):
+    path = initialize_historical_recovery(
+        Path(args.experiment_dir),
+        created_at=datetime.now(timezone.utc),
+        design_path=Path(__file__).resolve().parents[2] / HISTORICAL_RECOVERY_DESIGN_PATH,
+    )
+    print(f"initialized: {path}")
+    print("stage: preregistered")
+
+
+def cmd_historical_recovery_start(args):
+    load_historical_recovery_manifest(Path(args.manifest))
+    if (
+        args.max_nansen_calls != HISTORICAL_RECOVERY_MAX_CALLS
+        or args.max_nansen_credits != HISTORICAL_RECOVERY_MAX_CREDITS
+    ):
+        raise ValueError(
+            "historical recovery ceilings are fixed at "
+            f"{HISTORICAL_RECOVERY_MAX_CALLS} additional request attempts and "
+            f"{HISTORICAL_RECOVERY_MAX_CREDITS} additional credits"
+        )
+    print(
+        "Nansen incremental hard ceiling: "
+        f"{HISTORICAL_RECOVERY_MAX_CALLS} authenticated request attempts / "
+        f"{HISTORICAL_RECOVERY_MAX_CREDITS} credits"
+    )
+    result = start_historical_recovery(
+        Path(args.manifest),
+        nansen=NansenClient(),
+        clock=lambda: datetime.now(timezone.utc),
+        sleep=time.sleep,
+    )
+    print(f"stage: {result['stage']}")
+    if result["terminal_reason"]:
+        print(f"reason: {result['terminal_reason']}")
+
+
+def cmd_historical_recovery_check(args):
+    for path in check_historical_recovery(Path(args.manifest)):
+        print(f"verified: {path}")
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="nansen-lab")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -490,6 +541,29 @@ def build_parser():
     s = sub.add_parser("historical-check", help="verify historical discovery offline")
     s.add_argument("--manifest", required=True)
     s.set_defaults(func=cmd_historical_check)
+
+    s = sub.add_parser(
+        "historical-recovery-init",
+        help="initialize the source-bound holder-breadth recovery offline",
+    )
+    s.add_argument("--experiment-dir", required=True)
+    s.set_defaults(func=cmd_historical_recovery_init)
+
+    s = sub.add_parser(
+        "historical-recovery-start",
+        help="collect only holdings and outcomes for the frozen recovery cohort",
+    )
+    s.add_argument("--manifest", required=True)
+    s.add_argument("--max-nansen-calls", type=int, default=HISTORICAL_RECOVERY_MAX_CALLS)
+    s.add_argument("--max-nansen-credits", type=int, default=HISTORICAL_RECOVERY_MAX_CREDITS)
+    s.set_defaults(func=cmd_historical_recovery_start)
+
+    s = sub.add_parser(
+        "historical-recovery-check",
+        help="verify the source-bound historical recovery offline",
+    )
+    s.add_argument("--manifest", required=True)
+    s.set_defaults(func=cmd_historical_recovery_check)
     return p
 
 
@@ -498,6 +572,7 @@ def main():
     offline_commands = {
         "evaluate", "pilot-init", "pilot-replay", "pilot-check",
         "historical-init", "historical-check",
+        "historical-recovery-init", "historical-recovery-check",
     }
     if args.cmd not in offline_commands:
         load_dotenv()

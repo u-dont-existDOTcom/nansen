@@ -87,6 +87,24 @@ advance to capital: screener beta risk, selection-date-only liquidity, daily
 close proxies, and assumed 100/250-bps costs keep it below prospective and
 execution-aware profitability gates.
 
+### Source-bound recovery
+
+If a terminal discovery has complete, outcome-unseen screener bytes but fails
+only provider accounting/schema evidence, it is never reopened. The separately
+versioned recovery binds the source manifest and evidence, records raw and
+normalized row hashes, freezes its cohort and outcome requests before new
+access, and collects only holdings plus independent OHLCV. The v2 recovery
+admits exactly one observed-cost derivation and one source-only `bsc -> bnb`
+alias. New responses retain strict pricing and contract-native chain checks.
+Its seven-attempt/six-credit ceiling is incremental; the seal also reports the
+nine-attempt/eleven-credit source-plus-successor ceiling.
+
+```bash
+./nansen-lab historical-recovery-init --experiment-dir research/experiments/EXPERIMENT_ID
+./nansen-lab historical-recovery-start --manifest research/experiments/EXPERIMENT_ID/manifest.json
+./nansen-lab historical-recovery-check --manifest research/experiments/EXPERIMENT_ID/manifest.json
+```
+
 ## Prospective schema-v4 GPT pilot
 
 `2026-08-17-gpt-prospective-pilot` is a one-token, paper-only observation bound by hash to the frozen schema-v3 strategy records, the prospective design, and the pinned Nansen OpenAPI contract extract. Its lifecycle is append-only: `preregistered -> snapshot_collected -> decision_sealed -> entry_observed -> settled`, with `unscorable` as a terminal failure state. Every stage uses a hash-linked seal and an immutable snapshot of the Nansen budget journal; the mutable budget head is only a recoverable cache.

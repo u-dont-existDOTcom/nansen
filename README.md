@@ -81,6 +81,19 @@ historical holdings, and independent chain-batched daily OHLCV outcomes. It is
 discovery-only: daily close proxies, liquidity known only at selection, and
 fixed cost sensitivities cannot establish an executable or profitable strategy.
 
+The first bounded discovery sealed `unscorable` after the paid screener omitted
+its quoted-cost header. Its source-bound recovery adopts those exact bytes,
+freezes the audited `bsc`-to-`bnb` normalization and four outcome batches
+offline, and never calls the screener again. The recovery ceiling is seven
+additional authenticated attempts and six additional credits; including the
+source, the study ceiling is nine attempts and eleven credits:
+
+```bash
+./nansen-lab historical-recovery-init --experiment-dir research/experiments/EXPERIMENT_ID
+./nansen-lab historical-recovery-start --manifest research/experiments/EXPERIMENT_ID/manifest.json
+./nansen-lab historical-recovery-check --manifest research/experiments/EXPERIMENT_ID/manifest.json
+```
+
 The [`prospective GPT pilot`](research/experiments/2026-08-17-gpt-prospective-pilot/REPORT.md) is an immutable terminal schema-v4 observation. Its public Nansen contract preflight matched, but its OpenAI model-access preflight returned HTTP 401 before token selection or GPT inference; the result is `unscorable`, with zero Nansen calls and zero Nansen credits. The [terminal-audit erratum](docs/audits/2026-08-17-gpt-prospective-pilot-erratum.md) marks it unusable for model or strategy comparison because the wrong credential class should have failed local validation. The bundle cannot create an order, wallet action, venue submission, or capital movement and will not be rerun or rewritten.
 
 The [`prospective GPT pilot successor`](research/experiments/2026-08-17-gpt-prospective-pilot-successor/REPORT.md) is a separately named terminal schema-v4 observation. The corrected OpenAI key passed the exact `gpt-5.6-sol` model-access preflight, but Nansen's free account response omitted the declared credit-use and remaining-balance headers, so the protocol stopped before selection or inference. Its [result review](docs/audits/2026-08-17-gpt-prospective-pilot-successor-result-review.md) explains why replay conservatively records one ambiguous call/credit even though the received cost header was zero.

@@ -543,50 +543,66 @@ def _parse_ohlcv(
         body = bodies.get(logical_id)
         if not isinstance(body, dict):
             raise HistoricalDiscoveryError(f"missing OHLCV response for {logical_id}")
-        if body.get("chain") != payload["chain"] or body.get("timeframe") != "1d":
-            raise HistoricalDiscoveryError("OHLCV response identity does not match its request")
-        if body.get("truncated", False) is not False:
-            raise HistoricalDiscoveryError("OHLCV response is truncated")
-        requested = {
-            _identity(payload["chain"], address) for address in payload["token_addresses"]
-        }
-        if isinstance(body.get("tokens"), list):
-            token_rows = body["tokens"]
-        elif len(requested) == 1 and isinstance(body.get("data"), list):
-            token_rows = [{"token_address": body.get("token_address"), "data": body["data"]}]
-        else:
-            raise HistoricalDiscoveryError("OHLCV response has an invalid batch shape")
-        returned: set[tuple[str, str]] = set()
-        for token_row in token_rows:
-            if not isinstance(token_row, dict) or not isinstance(token_row.get("data"), list):
-                raise HistoricalDiscoveryError("OHLCV token record is invalid")
-            identity = _identity(payload["chain"], token_row.get("token_address"))
-            if identity not in requested or identity in returned:
-                raise HistoricalDiscoveryError("OHLCV returned an unexpected or duplicate token")
-            returned.add(identity)
-            previous: datetime | None = None
-            for candle in token_row["data"]:
-                if not isinstance(candle, dict):
-                    raise HistoricalDiscoveryError("OHLCV candle is not an object")
-                raw_start = candle.get("interval_start")
-                if not isinstance(raw_start, str):
-                    raise HistoricalDiscoveryError("OHLCV interval_start is invalid")
-                try:
-                    start = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
-                except ValueError as exc:
-                    raise HistoricalDiscoveryError("OHLCV interval_start is invalid") from exc
-                if start.tzinfo is None or start.utcoffset() is None:
-                    raise HistoricalDiscoveryError("OHLCV interval_start is not timezone-aware")
-                start = start.astimezone(timezone.utc)
-                if start.time() != datetime.min.time() or (previous is not None and start <= previous):
-                    raise HistoricalDiscoveryError("OHLCV daily candles are not strictly ordered at 00:00 UTC")
-                previous = start
-                day = start.date()
-                if not SIGNAL_FROM + timedelta(days=1) <= day <= HOLDINGS_TO:
-                    raise HistoricalDiscoveryError("OHLCV candle is outside the requested date range")
-                close = _finite(candle.get("close"), positive=True)
-                if close is not None:
-                    result[identity][day] = close
+        parsed = _parse_ohlcv_body(payload, body)
+        for identity, prices in parsed.items():
+            if set(result[identity]).intersection(prices):
+                raise HistoricalDiscoveryError("OHLCV batches duplicate a token/day")
+            result[identity].update(prices)
+    return result
+
+
+def _parse_ohlcv_body(
+    payload: dict[str, Any], body: dict[str, Any]
+) -> dict[tuple[str, str], dict[date, float]]:
+    if body.get("chain") != payload["chain"] or body.get("timeframe") != "1d":
+        raise HistoricalDiscoveryError("OHLCV response identity does not match its request")
+    if body.get("truncated", False) is not False:
+        raise HistoricalDiscoveryError("OHLCV response is truncated")
+    requested = {
+        _identity(payload["chain"], address) for address in payload["token_addresses"]
+    }
+    if isinstance(body.get("tokens"), list):
+        token_rows = body["tokens"]
+    elif len(requested) == 1 and isinstance(body.get("data"), list):
+        token_rows = [{"token_address": body.get("token_address"), "data": body["data"]}]
+    else:
+        raise HistoricalDiscoveryError("OHLCV response has an invalid batch shape")
+    returned: set[tuple[str, str]] = set()
+    result: dict[tuple[str, str], dict[date, float]] = defaultdict(dict)
+    for token_row in token_rows:
+        if not isinstance(token_row, dict) or not isinstance(token_row.get("data"), list):
+            raise HistoricalDiscoveryError("OHLCV token record is invalid")
+        identity = _identity(payload["chain"], token_row.get("token_address"))
+        if identity not in requested or identity in returned:
+            raise HistoricalDiscoveryError("OHLCV returned an unexpected or duplicate token")
+        returned.add(identity)
+        previous: datetime | None = None
+        for candle in token_row["data"]:
+            if not isinstance(candle, dict):
+                raise HistoricalDiscoveryError("OHLCV candle is not an object")
+            raw_start = candle.get("interval_start")
+            if not isinstance(raw_start, str):
+                raise HistoricalDiscoveryError("OHLCV interval_start is invalid")
+            try:
+                start = datetime.fromisoformat(raw_start.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise HistoricalDiscoveryError("OHLCV interval_start is invalid") from exc
+            if start.tzinfo is None or start.utcoffset() is None:
+                raise HistoricalDiscoveryError("OHLCV interval_start is not timezone-aware")
+            start = start.astimezone(timezone.utc)
+            if start.time() != datetime.min.time() or (previous is not None and start <= previous):
+                raise HistoricalDiscoveryError(
+                    "OHLCV daily candles are not strictly ordered at 00:00 UTC"
+                )
+            previous = start
+            day = start.date()
+            if not SIGNAL_FROM + timedelta(days=1) <= day <= HOLDINGS_TO:
+                raise HistoricalDiscoveryError("OHLCV candle is outside the requested date range")
+            close = _finite(candle.get("close"), positive=True)
+            if close is not None:
+                result[identity][day] = close
+    if returned != requested:
+        raise HistoricalDiscoveryError("OHLCV response omits a requested token")
     return result
 
 
