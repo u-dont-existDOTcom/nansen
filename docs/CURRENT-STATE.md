@@ -7,13 +7,16 @@ Updated: 2026-08-18
 Find a strategy that survives prospective, execution-aware profitability gates.
 The owner approved proceeding with the recommended Nansen cohort and an
 approximately 1,800-credit evidence budget. The funded 32-cycle holdout is now
-active.
+active. On 2026-08-18 the owner separately authorized continued theory
+generation and evidence collection against the rest of the funded Nansen
+balance; that authorization does not alter this holdout's frozen rules or cap.
 
 ## Verified baseline
 
 - Offline cohort implementation: `22f5d2a` plus reviewed hardening checkpoint
   `a6367fb` and recovery checkpoint `ca714e3`.
 - Frozen live preregistration: `248dd16`; cycle-one evidence: `dda2a9c`.
+- External cohort automation: `e086a42`.
 - Historical result baseline: `c91609b` plus terminal replay guard `cbd165c`.
 - Historical holder-breadth recovery v2 is immutable `completed` and
   `does_not_advance`; do not rerun or tune it.
@@ -37,6 +40,9 @@ active.
 - Cycle one was scheduled for `2026-08-18T15:05:00Z` and terminalized
   `unscorable` with the frozen reason `insufficient_strata`. No reroll or
   settlement is allowed or required.
+- Because the frozen advancement gate requires all 32 cycles to seal outcomes,
+  v1 can no longer advance after cycle one's unscorable result. The owner
+  explicitly chose to complete it unchanged as a descriptive/training dataset.
 - Verified cumulative use: 2 authenticated attempts, 1 billable credit, and no
   ceiling breach. The full funding gate passed before the screener.
 - Cycle two is scheduled for `2026-08-20T11:05:00Z`.
@@ -45,6 +51,29 @@ active.
   offline tree verifier can loop while comparing absolute descendants to a
   relative root. Absolute-path replay/check passed. Do not patch the frozen
   implementation during the holdout.
+
+## Active automation
+
+- `nansen-signal-lab-cohort.timer` is installed under
+  `/home/joel/.config/systemd/user/`, enabled, and active. It polls every UTC
+  minute, but makes no provider call before a frozen action is due.
+- Login lingering is enabled (`Linger=yes`), so the user manager survives logout
+  and starts at boot. The unit copy is on `/home`, not the optional `nofail`
+  `/mnt/hdd` mount; if the repository mount is temporarily absent, later timer
+  polls retry after it appears.
+- The first automatic poll at `2026-08-18T17:58:00Z` exited successfully with no
+  due action. A separate host smoke proved the service sandbox, private runtime
+  lock, NTP query, and NetworkManager readiness query.
+- Installed service SHA-256:
+  `b4fe3833d8767207faab023093cc557d21265c10e49330c8131f4b8bac42832f`.
+  Installed timer SHA-256:
+  `cde29e3e7c1ee832f576c76b029bfb8c837c7947bd58e05a956e08c694f7038b`.
+- The supervisor drains overdue non-network terminalizations under one lock,
+  then reaches any still-live cycle in the same invocation. It requires
+  synchronized time, network readiness for paid actions, state progress after
+  every command, and a successful absolute-path integrity check afterward.
+- The machine must remain powered and awake around observation windows. The
+  timer cannot reconstruct market evidence missed during power-off or suspend.
 
 ## Completed offline implementation
 
@@ -78,16 +107,27 @@ maximum of 56 billable credits per cycle (1 screener plus at most 11 per token)
 and 1,792 total. A zero-credit authenticated account preflight makes the hard
 attempt ceiling 57 per cycle and 1,824 total attempts.
 
+After cycle one's one-credit screener, v1 retains a maximum frozen reserve of
+1,736 credits and the provider reported 50,063 remaining. The owner's broader
+authorization reserves the approximately 48,327-credit headroom for separately
+named, source-bound experiments. It must not be spent by enlarging, tuning, or
+rerolling v1; each later protocol still needs its own fixed estimand, request
+plan, ceiling, future sample, offline tests, and preregistration before paid
+calls. "Use the credits" means evidence-bearing requests under those protocols,
+not purposeless balance exhaustion.
+
 This provides 160 candidate opportunities. It does not guarantee 100 strategy
 signals. Implementation must therefore report `insufficient_strategy_fills`
 rather than treating counterfactual fills as strategy fills. Increasing the
-program to 64 cycles would approximately double the maximum spend and requires
-new owner approval before preregistration.
+active program to 64 cycles is forbidden. A larger successor must be separately
+designed, reviewed, and preregistered; the broader owner spend authorization
+covers that later protocol without changing v1.
 
 ## Verification
 
-- Full offline suite: 635 passed in 95.01 seconds.
+- Full offline suite: 643 passed in 101.51 seconds.
 - Complete cohort lifecycle suite: 26 passed.
+- Cohort supervisor suite: 8 passed.
 - `compileall` and `git diff --check`: passed.
 - Exact cohort design SHA-256:
   `891fb3ba5307723f79d0413fc8d45957b1d11f966e5f920fa40ee732de7a230a`.
@@ -100,16 +140,14 @@ new owner approval before preregistration.
 
 ## Next safe action
 
-At `2026-08-20T11:05:00Z`, start cycle two with the absolute manifest path:
+No manual cycle command is currently due. The enabled timer will start cycle two
+at `2026-08-20T11:05:00Z`; the allowed start window ends at `11:20:00Z`. If
+decisions seal, it will read and honor the exact `earliest_settlement` timestamp
+from that sealed artifact rather than assuming a four-hour boundary. Verify and
+commit newly created evidence at the next durable checkpoint; the timer itself
+does not stage, commit, push, or publish.
 
-```bash
-./nansen-lab cohort-start-cycle \
-  --program /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-18-prospective-multi-cycle-cohort-v1/program.json \
-  --cycle 2
-```
-
-Do not invoke it early; the allowed start window ends at `11:20:00Z`. If it
-seals decisions, settle no earlier than `2026-08-20T15:05:00Z`, again using the
-absolute path. If it terminalizes unscorable, verify and commit the evidence and
-advance to the next fixed cycle without rerolling. Do not tune the protocol,
-edit its runtime, push, or publish during the holdout.
+In parallel, design and independently review a separate post-v1 research
+protocol for the newly authorized headroom. Keep v1 outcome-blind and untouched.
+Before any manual intervention, stop the timer and confirm its oneshot service
+is inactive so it cannot race an operator command.
