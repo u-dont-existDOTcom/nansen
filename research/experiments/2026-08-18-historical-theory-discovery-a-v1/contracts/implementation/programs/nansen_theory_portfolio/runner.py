@@ -154,6 +154,7 @@ def _source_paths(repo_root: Path) -> tuple[Path, ...]:
             repo_root / "scripts/prospective_cohort_timer.py",
             repo_root / "requirements.txt",
             repo_root / "nansen-lab",
+            repo_root / "pytest.ini",
             repo_root / DESIGN_PATH,
         ]
     )
