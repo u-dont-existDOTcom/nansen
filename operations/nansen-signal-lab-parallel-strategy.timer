@@ -1,0 +1,12 @@
+[Unit]
+Description=Poll the frozen Nansen parallel-strategy schedule every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00 UTC
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=nansen-signal-lab-parallel-strategy.service
+
+[Install]
+WantedBy=timers.target

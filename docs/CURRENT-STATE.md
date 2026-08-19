@@ -1,6 +1,6 @@
 # Current state
 
-Updated: 2026-08-18
+Updated: 2026-08-19
 
 ## Goal
 
@@ -10,6 +10,12 @@ approximately 1,800-credit evidence budget. The funded 32-cycle holdout is now
 active. On 2026-08-18 the owner separately authorized continued theory
 generation and evidence collection against the rest of the funded Nansen
 balance; that authorization does not alter this holdout's frozen rules or cap.
+On 2026-08-19 the owner explicitly authorized a new independent prospective
+program that evaluates all promising preregistered strategies concurrently.
+Concurrency means common, outcome-independent evidence collection followed by
+parallel offline rule evaluation; provider transmissions remain serialized and
+append-only. The new program must quarantine Program A/A2 market outcomes and
+must not masquerade as their forbidden A3/B2 continuation.
 
 ## Verified baseline
 
@@ -74,6 +80,23 @@ balance; that authorization does not alter this holdout's frozen rules or cap.
   every command, and a successful absolute-path integrity check afterward.
 - The machine must remain powered and awake around observation windows. The
   timer cannot reconstruct market evidence missed during power-off or suspend.
+
+## Terminal theory-discovery programs
+
+- Historical Program A is terminal after a provider-semantics 422 on the
+  selected Solana USDC flow request. Its frozen successor A2 did not retry that
+  event and started from original anchor seven.
+- A2 terminalized `unscorable` after a charged/provider HTTP 500 at
+  `a52-s05-ethereum-upper_tail/ohlcv`. Offline replay verifies 45 terminal
+  anchors, 1,219 authenticated attempts, and 4,829 conservative billable
+  credits. Terminal evidence is committed at `e176277`.
+- A2's frozen machine B2 eligibility is false/empty, so the drafted B2 funnel
+  cannot initialize, substitute a candidate, retry A2, or create A3. Its
+  untracked code is an offline design reference only and authorizes no request.
+- The new owner-authorized program is a separately named prospective protocol.
+  It may reuse pre-existing candidate definitions and audited implementation
+  primitives, but it may not inspect or use A/A2 token panels, features,
+  outcomes, scores, rankings, or descriptive shortlists to choose its rules.
 
 ## Completed offline implementation
 
@@ -147,7 +170,11 @@ from that sealed artifact rather than assuming a four-hour boundary. Verify and
 commit newly created evidence at the next durable checkpoint; the timer itself
 does not stage, commit, push, or publish.
 
-In parallel, design and independently review a separate post-v1 research
-protocol for the newly authorized headroom. Keep v1 outcome-blind and untouched.
+In parallel, freeze and independently review the newly authorized post-v1
+multi-strategy prospective protocol. Use common counterfactual evidence to
+evaluate the full predeclared candidate family concurrently, but serialize
+every provider transmission and select at most one rule through a purged,
+identity-disjoint discovery/validation design. Require replay-valid terminal v1
+before that program's first request, so its balance epochs cannot race v1.
 Before any manual intervention, stop the timer and confirm its oneshot service
 is inactive so it cannot race an operator command.
