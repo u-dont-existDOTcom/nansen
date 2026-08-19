@@ -98,6 +98,45 @@ must not masquerade as their forbidden A3/B2 continuation.
   primitives, but it may not inspect or use A/A2 token panels, features,
   outcomes, scores, rankings, or descriptive shortlists to choose its rules.
 
+## Preregistered parallel-strategy program
+
+- Program:
+  `research/experiments/2026-08-19-prospective-parallel-strategy-v1/program.json`.
+- Preregistered manifest SHA-256:
+  `17d7cf6be19e48d095fc27ef080223b293706048bb5d4c07855bfed589811bb3`.
+- Source checkpoints: implementation `870eaf6`, direct-entrypoint hardening
+  `dfb81e3`, and inert preregistration bundle `6143d73`.
+- Stage is `preregistered`; terminal-v1 activation evidence is intentionally
+  absent. Initialization made no public or authenticated provider request and
+  authorizes none.
+- The program evaluates all eleven pre-live fixed non-cash rules from candidate
+  contract SHA-256
+  `aa4d1085a0b3594a8a255584e0aec7a0bdab0a6438bcc63b7af0076a9f5d056a`
+  on one common evidence panel. Provider requests are serialized; rule
+  evaluation is parallel and offline. `c01` is the a-priori anchor, at most one
+  discovery challenger joins it in validation, and no fallback is allowed.
+- Discovery is 42 eight-hour cycles from `2026-10-15T12:05:00Z`; validation is
+  43 identity-disjoint cycles after a frozen 32-hour purge, ending
+  `2026-11-13T12:05:00Z`. Maximum authority is 12,410 authenticated attempts and
+  12,240 billable credits. Current use is zero attempts and zero credits.
+- A replay-valid terminal cohort v1 is mandatory before activation. Calendar
+  passage is insufficient; a nonterminal v1 causes an offline missed-window
+  transition, never a race or backfill.
+- `nansen-signal-lab-parallel-strategy.timer` is installed as a copy under
+  `/home/joel/.config/systemd/user/`, enabled, and active. The no-action service
+  smoke returned `Result=success` and `ExecMainStatus=0`.
+- Installed service SHA-256:
+  `221d51596246515807e2c7d7ae6dbf55a7394589bd902fea1dbb909869239b81`.
+  Installed timer SHA-256:
+  `0dad373b4c243f969defffdfa5551643bed77fd6b8441051ae87ddfa627cf123`.
+- The committed cohort runtime-preservation drop-in is installed separately at
+  `/home/joel/.config/systemd/user/nansen-signal-lab-cohort.service.d/` with
+  SHA-256
+  `6d4d6fb1a8b1916eaac6d7eece3cea5ba442c7e730258369553d9da66a045efb`.
+  This preserves the shared provider-lock inode without changing the
+  byte-frozen repository cohort unit. Both installed service fragments live on
+  `/home`; login lingering remains enabled.
+
 ## Completed offline implementation
 
 The append-only multi-cycle prospective cohort family now:
@@ -160,6 +199,17 @@ covers that later protocol without changing v1.
   `5d5859be0c03bd1f786436ad199aac48de9c6688883392836796c0f8e3ccf6d5`.
 - Offline implementation verification made no live calls; active cohort usage
   is recorded separately above.
+- New parallel-strategy suite: 118 passed in 620.42 seconds, including the
+  nonconstant 10,000-replicate bootstrap, exact denominators, full fake-provider
+  lifecycle, crash injection, tamper replay, balance continuity, and systemd
+  boundaries.
+- Full terminal A2 replay suite: 27 passed in 336.27 seconds; terminal Program A
+  replay remains byte-exact after isolating all new deployment templates.
+- Independent blocker/high review: ready. `compileall`, `git diff --check`,
+  preregistration HEAD equality, runtime replay, and `systemd-analyze verify`
+  passed. No new-program provider request was made.
+- Final whole-repository regression after preregistration and deployment:
+  859 passed in 974.35 seconds.
 
 ## Next safe action
 
@@ -170,11 +220,9 @@ from that sealed artifact rather than assuming a four-hour boundary. Verify and
 commit newly created evidence at the next durable checkpoint; the timer itself
 does not stage, commit, push, or publish.
 
-In parallel, freeze and independently review the newly authorized post-v1
-multi-strategy prospective protocol. Use common counterfactual evidence to
-evaluate the full predeclared candidate family concurrently, but serialize
-every provider transmission and select at most one rule through a purged,
-identity-disjoint discovery/validation design. Require replay-valid terminal v1
-before that program's first request, so its balance epochs cannot race v1.
-Before any manual intervention, stop the timer and confirm its oneshot service
-is inactive so it cannot race an operator command.
+The enabled parallel-strategy timer remains inert until its frozen activation
+lead time. It will then require and replay terminal v1 before creating any
+provider client. Do not manually activate it early, inspect A/A2 market results
+to tune it, add strategies, or spend its authority outside the preregistered
+request plan. Before any manual cohort intervention, stop the cohort timer and
+confirm its oneshot service is inactive so it cannot race the operator command.
