@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -359,5 +360,23 @@ def test_systemd_units_verify():
         check=False,
         capture_output=True,
         text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+@pytest.mark.parametrize(
+    "script",
+    (
+        "scripts/nansen_parallel_strategy.py",
+        "scripts/nansen_parallel_strategy_timer.py",
+    ),
+)
+def test_installed_script_entrypoints_import_from_repository(script: str):
+    completed = subprocess.run(
+        (sys.executable, str(REPO / script), "--help"),
+        cwd=REPO,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert completed.returncode == 0, completed.stderr
