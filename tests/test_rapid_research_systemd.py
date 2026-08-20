@@ -331,6 +331,28 @@ def test_retirement_gate_rejects_manual_old_provider_process(
         timer_script.require_retired_authority()
 
 
+def test_retired_timer_need_not_expose_a_main_pid(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        timer_script.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "LoadState=loaded\nActiveState=inactive\n"
+                "UnitFileState=disabled\n"
+            ),
+        ),
+    )
+
+    assert timer_script._unit_properties("retired.timer") == {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "UnitFileState": "disabled",
+    }
+
+
 def test_execute_fails_closed_when_post_action_check_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
