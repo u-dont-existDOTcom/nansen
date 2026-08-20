@@ -1,0 +1,14 @@
+[Unit]
+Description=Queue an immediate alert when the Nansen research action fails
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/scripts/nansen_alert_monitor.py --service-failure nansen-signal-lab-rapid-research.service
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/nansen-signal-lab-alerts
+RestrictAddressFamilies=AF_UNIX

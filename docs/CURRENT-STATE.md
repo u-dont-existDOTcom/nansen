@@ -72,6 +72,18 @@ superseded October program remain quarantined.
   `ExecMainStatus=0`. The post-activation integrity check reports all 85 cycles
   planned, zero authenticated attempts, zero billable credits, and no budget
   halt.
+- `nansen-signal-lab-research-alerts.timer` is installed under the persistent
+  user manager, enabled, active, and polls at second 20 of each UTC minute. It
+  sends deduplicated desktop notifications for a disabled/stopped research
+  timer, research-service failure, a global fatal stop, the sealed discovery
+  milestone, and the sealed final result. The rapid service has an independent
+  `OnFailure=nansen-signal-lab-research-alert-failure.service` drop-in. Alert
+  delivery is retried from private state under
+  `~/.local/state/nansen-signal-lab-alerts` if no desktop notification daemon is
+  available while logged out. An end-to-end setup notification was delivered
+  successfully on 2026-08-20. This observer is deliberately named outside the
+  frozen rapid-runtime source globs and cannot advance or mutate the research
+  program.
 - Installed service SHA-256:
   `dcbce67661ed8dd8aa4a746a9f6816e9b5e03dc206d39e941445849195c86756`.
   Installed timer SHA-256:

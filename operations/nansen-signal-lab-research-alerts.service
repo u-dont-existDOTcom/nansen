@@ -1,0 +1,17 @@
+[Unit]
+Description=Deliver Nansen research milestone and failure alerts
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/scripts/nansen_alert_monitor.py --manifest /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-20-rapid-prospective-parallel-strategy-v1/program.json
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=%t/bus
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/nansen-signal-lab-alerts
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=default.target
