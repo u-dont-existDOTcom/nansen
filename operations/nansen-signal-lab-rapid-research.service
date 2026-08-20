@@ -1,0 +1,29 @@
+# Deployment contract: copy this unit into ~/.config/systemd/user/; do not
+# symlink it from the optional /mnt/hdd repository mount.
+[Unit]
+Description=Advance the frozen Nansen rapid parallel-research program
+
+[Service]
+Type=oneshot
+WorkingDirectory=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab
+ExecStart=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/.venv/bin/python /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/scripts/nansen_rapid_research_timer.py --manifest /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-20-rapid-prospective-parallel-strategy-v1/program.json
+EnvironmentFile=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateUsers=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+RuntimeDirectory=nansen-signal-lab-rapid-research nansen-signal-lab-provider
+RuntimeDirectoryPreserve=yes
+RuntimeDirectoryMode=0700
+ReadWritePaths=/mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/research/experiments/2026-08-20-rapid-prospective-parallel-strategy-v1
+ReadWritePaths=%t/nansen-signal-lab-rapid-research
+ReadWritePaths=%t/nansen-signal-lab-provider
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=default.target

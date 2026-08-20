@@ -1,0 +1,14 @@
+# Deployment contract: copy this unit into ~/.config/systemd/user/; do not
+# symlink it from the optional /mnt/hdd repository mount.
+[Unit]
+Description=Poll the frozen Nansen rapid parallel-research schedule every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00 UTC
+Persistent=true
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=nansen-signal-lab-rapid-research.service
+
+[Install]
+WantedBy=timers.target
