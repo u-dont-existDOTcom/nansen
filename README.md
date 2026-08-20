@@ -142,34 +142,39 @@ versions. Every live command and offline replay refuses environment drift, so
 selection, decisions, execution scoring, and aggregation cannot change
 outcome-adaptively during the eight-week holdout.
 
-The active cohort is advanced by the external
-`scripts/prospective_cohort_timer.py` supervisor and the versioned user units in
-`ops/systemd/`. The timer wakes every minute but makes no call before an action
-is due. It requires an NTP-synchronized clock, waits for NetworkManager before
-live work, uses the absolute manifest path, resumes crash-safe stages, and reads
-the exact settlement boundary from the sealed decision artifact. It never
-rerolls or edits the frozen implementation. Install and enable the versioned
-units with:
+The former cohort stopped after cycle one and its timer must remain disabled.
+The active rapid successor evaluates all eleven fixed strategies concurrently
+and offline from each shared 13-token panel; it never duplicates provider calls
+per strategy. Its 42 discovery cycles target a preliminary lead after roughly
+14 days, followed by 43 identity-disjoint validation cycles and a result after
+roughly 29 days. The exact ceiling is 12,410 authenticated attempts and 12,240
+credits. The supervisor wakes every minute but makes no request before an
+action is due, proves retired automation remains stopped, requires synchronized
+time/network for live work, resumes crash-safe stages, and performs an offline
+integrity check after every action.
+
+The checked-in units must be copied to `/home`, not symlinked from the optional
+repository mount:
 
 ```bash
-install -Dm0644 \
-  /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/ops/systemd/nansen-signal-lab-cohort.service \
-  /home/joel/.config/systemd/user/nansen-signal-lab-cohort.service
-install -Dm0644 \
-  /mnt/hdd/home/joel/Téléchargements/nansen-signal-lab/ops/systemd/nansen-signal-lab-cohort.timer \
-  /home/joel/.config/systemd/user/nansen-signal-lab-cohort.timer
+install -m 0644 \
+  operations/nansen-signal-lab-rapid-research.service \
+  operations/nansen-signal-lab-rapid-research.timer \
+  /home/joel/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now nansen-signal-lab-cohort.timer
+systemctl --user disable --now nansen-signal-lab-cohort.timer
+systemctl --user disable --now nansen-signal-lab-parallel-strategy.timer
+systemctl --user enable --now nansen-signal-lab-rapid-research.timer
 loginctl enable-linger "$USER"
 ```
 
 Verify the installed unit, next poll, linger state, and service log with:
 
 ```bash
-systemctl --user status nansen-signal-lab-cohort.timer
-systemctl --user list-timers nansen-signal-lab-cohort.timer
+systemctl --user status nansen-signal-lab-rapid-research.timer
+systemctl --user list-timers nansen-signal-lab-rapid-research.timer
 loginctl show-user "$USER" -p Linger
-journalctl --user -u nansen-signal-lab-cohort.service
+journalctl --user -u nansen-signal-lab-rapid-research.service
 ```
 
 The machine must remain powered and awake around collection windows. User
