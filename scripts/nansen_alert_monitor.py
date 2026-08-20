@@ -120,17 +120,33 @@ def queue_event(
 def _notify(event: dict[str, Any]) -> bool:
     command = [
         "/usr/bin/notify-send",
-        "--app-name=Nansen Research",
+        "--print-id",
+        "--app-name=Nansen-Research",
         f"--urgency={event['urgency']}",
-        "--expire-time=0" if event["urgency"] == "critical" else "--expire-time=15000",
+        "--expire-time=0",
+        "--hint=string:desktop-entry:org.gnome.Terminal",
+        "--icon=dialog-warning"
+        if event["urgency"] == "critical"
+        else "--icon=dialog-information",
         str(event["title"]),
         str(event["body"]),
     ]
     try:
-        result = subprocess.run(command, check=False, timeout=15)
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return False
-    return result.returncode == 0
+    notification_id = result.stdout.strip()
+    return (
+        result.returncode == 0
+        and notification_id.isdecimal()
+        and int(notification_id) > 0
+    )
 
 
 def deliver_pending(

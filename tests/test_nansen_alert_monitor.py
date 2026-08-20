@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,6 +106,36 @@ def test_failed_delivery_remains_pending(tmp_path):
     delivered = state / "delivered"
     assert not delivered.exists() or not list(delivered.glob("*.json"))
     assert alerts.deliver_pending(state, notifier=lambda _event: True) == 1
+
+
+def test_notify_requires_accepted_persistent_desktop_notification(monkeypatch):
+    observed = []
+
+    def accepted(command, **kwargs):
+        observed.append((command, kwargs))
+        return SimpleNamespace(returncode=0, stdout="453\n")
+
+    monkeypatch.setattr(alerts.subprocess, "run", accepted)
+    event = {
+        "urgency": "normal",
+        "title": "Ready",
+        "body": "Review results",
+    }
+    assert alerts._notify(event) is True
+    command, kwargs = observed[0]
+    assert "--print-id" in command
+    assert "--expire-time=0" in command
+    assert "--hint=string:desktop-entry:org.gnome.Terminal" in command
+    assert "--icon=dialog-information" in command
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+
+    monkeypatch.setattr(
+        alerts.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout=""),
+    )
+    assert alerts._notify(event) is False
 
 
 def test_alert_files_do_not_enter_frozen_runtime_globs():
