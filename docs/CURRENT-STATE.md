@@ -218,7 +218,8 @@ later request.
   `5d5859be0c03bd1f786436ad199aac48de9c6688883392836796c0f8e3ccf6d5`.
 - Offline implementation verification made no provider calls; owner-aborted
   cohort use is recorded separately above.
-- Rapid parallel-strategy verification: 123 focused tests passed, including the
+- Rapid parallel-strategy verification: 115 unique focused tests passed,
+  including the
   nonconstant 10,000-replicate bootstrap, exact denominators, full fake-provider
   lifecycle, crash injection, tamper replay, balance continuity, and systemd
   boundaries.
