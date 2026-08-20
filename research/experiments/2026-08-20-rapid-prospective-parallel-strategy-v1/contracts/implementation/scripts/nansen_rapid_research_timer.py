@@ -339,12 +339,11 @@ def _unit_properties(unit: str) -> dict[str, str]:
         key, separator, value = line.partition("=")
         if separator:
             properties[key] = value
-    if set(properties) != {
-        "LoadState",
-        "ActiveState",
-        "UnitFileState",
-        "MainPID",
-    }:
+    required = {"LoadState", "ActiveState", "UnitFileState"}
+    allowed = required | {"MainPID"}
+    if not required <= set(properties) <= allowed:
+        raise RuntimeError(f"retired unit state is incomplete: {unit}")
+    if unit.endswith(".service") and "MainPID" not in properties:
         raise RuntimeError(f"retired unit state is incomplete: {unit}")
     return properties
 
@@ -358,7 +357,7 @@ def require_retired_authority() -> None:
             raise RuntimeError(f"retired unit load state is unsafe: {unit}")
         if properties["ActiveState"] not in {"inactive", "failed"}:
             raise RuntimeError(f"retired unit is still active: {unit}")
-        if properties["MainPID"] != "0":
+        if properties.get("MainPID", "0") != "0":
             raise RuntimeError(f"retired unit still has a process: {unit}")
         if unit.endswith(".timer") and properties["UnitFileState"] not in {
             "disabled",
