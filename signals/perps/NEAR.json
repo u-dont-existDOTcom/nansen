@@ -1,0 +1,76 @@
+{
+  "status": "live",
+  "symbol": "NEAR",
+  "generated_at": "2026-08-22T09:07:40.791655Z",
+  "source": "Nansen Hyperliquid Smart Money perp-screener",
+  "note": "No API key or raw request headers are stored in this file.",
+  "requests": {
+    "perp_screener_24h": {
+      "ok": true,
+      "rows": 1,
+      "cache_hit": false
+    },
+    "perp_screener_7d": {
+      "ok": true,
+      "rows": 1,
+      "cache_hit": false
+    }
+  },
+  "periods": {
+    "24h": {
+      "response_retrieved_at": "2026-08-22T09:07:42.186597Z",
+      "cache_hit": false,
+      "rows": [
+        {
+          "smart_money_volume": 5506194.90756,
+          "smart_money_buy_volume": 1740285.15662,
+          "smart_money_sell_volume": 3765909.75094,
+          "net_position_change": -2025624.59432,
+          "trader_count": 14,
+          "token_symbol": "NEAR",
+          "mark_price": 1.9407,
+          "funding": 4.190508181818182e-05,
+          "previous_price_usd": 1.8768,
+          "open_interest": 78555616.66813634,
+          "current_smart_money_position_longs_usd": 5084878.72227,
+          "current_smart_money_position_shorts_usd": -4249564.763040001,
+          "smart_money_longs_count": 14,
+          "smart_money_shorts_count": 17
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "per_page": 10,
+        "is_last_page": true
+      }
+    },
+    "7d": {
+      "response_retrieved_at": "2026-08-22T09:07:44.333036Z",
+      "cache_hit": false,
+      "rows": [
+        {
+          "smart_money_volume": 8535977.7575,
+          "smart_money_buy_volume": 3565668.35949,
+          "smart_money_sell_volume": 4970309.39801,
+          "net_position_change": -1404641.03852,
+          "trader_count": 19,
+          "token_symbol": "NEAR",
+          "mark_price": 1.9407,
+          "funding": 4.190508181818182e-05,
+          "previous_price_usd": 1.634,
+          "open_interest": 78555616.66813634,
+          "current_smart_money_position_longs_usd": 5084878.72227,
+          "current_smart_money_position_shorts_usd": -4249564.763040001,
+          "smart_money_longs_count": 14,
+          "smart_money_shorts_count": 17
+        }
+      ],
+      "pagination": {
+        "page": 1,
+        "per_page": 10,
+        "is_last_page": true
+      }
+    }
+  },
+  "recent_trades": null
+}
