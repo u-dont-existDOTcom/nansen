@@ -98,7 +98,10 @@ def main():
     if not symbol or not re.fullmatch(r"[A-Z0-9._-]{1,20}", symbol):
         raise ValueError("symbol must be a simple uppercase perp symbol")
 
-    load_dotenv()
+    # Resolve the credential from the operator's current repository checkout,
+    # even when this script itself is executed from /tmp or another location.
+    env_path = Path.cwd() / ".env"
+    load_dotenv(dotenv_path=env_path)
     client = NansenClient()
     output = Path(args.output or f"signals/perps/{symbol}.json")
     snapshot = {
