@@ -1,0 +1,22 @@
+{
+  "status": "error",
+  "symbol": "NEAR",
+  "generated_at": "2026-08-22T08:53:07.299756Z",
+  "source": "Nansen Hyperliquid Smart Money perp-screener",
+  "note": "No API key or raw request headers are stored in this file.",
+  "requests": {
+    "perp_screener_24h": {
+      "ok": false,
+      "error": "NansenError: Nansen HTTP 422: {\"error\": \"Unknown field\", \"message\": \"Field 'only_smart_money' is not recognized. Please check the API documentation for valid request fields.\", \"code\": \"unknown_field\", \"status\": 422, \"request_id\": \"c664cb2e82774073976f001e7833032d\", \"doc_url\": \"https://docs.nansen.ai/getting-started/error-handling#unknown_field\", \"param\": \"only_smart_money\", \"errors\": [{\"field\": \"body.only_smart_money\", \"message\": \"Field 'only_smart_money' is not recognized. Please check the API documentation for valid request fields.\", \"code\": \"unknown_field\"}]}"
+    },
+    "perp_screener_7d": {
+      "ok": false,
+      "error": "NansenError: Nansen HTTP 422: {\"error\": \"Unknown field\", \"message\": \"Field 'only_smart_money' is not recognized. Please check the API documentation for valid request fields.\", \"code\": \"unknown_field\", \"status\": 422, \"request_id\": \"afa0224b02fa5f49ae1943479f1c6050\", \"doc_url\": \"https://docs.nansen.ai/getting-started/error-handling#unknown_field\", \"param\": \"only_smart_money\", \"errors\": [{\"field\": \"body.only_smart_money\", \"message\": \"Field 'only_smart_money' is not recognized. Please check the API documentation for valid request fields.\", \"code\": \"unknown_field\"}]}"
+    }
+  },
+  "periods": {
+    "24h": null,
+    "7d": null
+  },
+  "recent_trades": null
+}
