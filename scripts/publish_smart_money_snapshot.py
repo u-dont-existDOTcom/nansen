@@ -58,10 +58,84 @@ def screener(
 
 def safe_error(exc: Exception) -> str:
     text = str(exc).replace("\n", " ").strip()
-    # Never publish environment-style secrets if an upstream error unexpectedly echoes them.
     text = re.sub(r"(?i)(NANSEN_API_KEY\s*[=:]\s*)\S+", r"\1[REDACTED]", text)
     text = re.sub(r"(?i)(apikey\s*[=:]\s*)\S+", r"\1[REDACTED]", text)
     return f"{type(exc).__name__}: {text[:800]}"
+
+
+def compact_row(row: dict) -> dict:
+    return {
+        "chain": row.get("chain"),
+        "symbol": row.get("symbol"),
+        "token_address": row.get("token_address"),
+        "price_change_pct": row.get("price_change_pct"),
+        "netflow_usd": row.get("netflow_usd"),
+        "market_cap_usd": row.get("market_cap_usd"),
+    }
+
+
+def row_key(row: dict) -> tuple[str, str]:
+    return (str(row.get("chain") or ""), str(row.get("token_address") or row.get("symbol") or ""))
+
+
+def build_summary(snapshot: dict) -> dict:
+    distribution = snapshot.get("distribution", {})
+    by_horizon = {h: {row_key(r): r for r in distribution.get(h, [])} for h in DEFAULT_TIMEFRAMES}
+    keysets = {h: set(rows) for h, rows in by_horizon.items()}
+
+    all_three = set.intersection(*(keysets[h] for h in DEFAULT_TIMEFRAMES)) if all(keysets[h] for h in DEFAULT_TIMEFRAMES) else set()
+    short_medium = keysets["24h"] & keysets["7d"]
+
+    def persistence(keys):
+        out = []
+        for key in keys:
+            source = by_horizon["24h"].get(key) or by_horizon["7d"].get(key) or by_horizon["30d"].get(key)
+            item = {
+                "chain": source.get("chain"),
+                "symbol": source.get("symbol"),
+                "token_address": source.get("token_address"),
+                "price_change_24h_pct": (by_horizon["24h"].get(key) or {}).get("price_change_pct"),
+                "netflow_24h_usd": (by_horizon["24h"].get(key) or {}).get("netflow_usd"),
+                "netflow_7d_usd": (by_horizon["7d"].get(key) or {}).get("netflow_usd"),
+                "netflow_30d_usd": (by_horizon["30d"].get(key) or {}).get("netflow_usd"),
+            }
+            out.append(item)
+        return sorted(
+            out,
+            key=lambda x: abs(float(x.get("netflow_24h_usd") or 0))
+            + abs(float(x.get("netflow_7d_usd") or 0))
+            + abs(float(x.get("netflow_30d_usd") or 0)),
+            reverse=True,
+        )
+
+    divergence = [
+        compact_row(r)
+        for r in distribution.get("24h", [])
+        if float(r.get("netflow_usd") or 0) < 0 and float(r.get("price_change_pct") or 0) > 5
+    ]
+
+    horizon_stats = {}
+    for h in DEFAULT_TIMEFRAMES:
+        rows = distribution.get(h, [])
+        negatives = [r for r in rows if float(r.get("netflow_usd") or 0) < 0]
+        horizon_stats[h] = {
+            "rows": len(rows),
+            "negative_rows": len(negatives),
+            "top25_negative_netflow_sum_usd": sum(float(r.get("netflow_usd") or 0) for r in negatives),
+            "note": "sum is only across returned most-negative rows, not total market netflow",
+        }
+
+    return {
+        "classification_scope": "screened Smart-Money token distribution; not a portfolio-specific sell signal",
+        "horizon_stats": horizon_stats,
+        "persistent_distribution_all_3_horizons": persistence(all_three)[:10],
+        "persistent_distribution_24h_and_7d": persistence(short_medium)[:15],
+        "price_up_while_smart_money_sells_24h": divergence[:10],
+        "top_distribution": {
+            h: [compact_row(r) for r in distribution.get(h, [])[:5]] for h in DEFAULT_TIMEFRAMES
+        },
+        "top_accumulation_24h": [compact_row(r) for r in snapshot.get("accumulation_24h", [])[:5]],
+    }
 
 
 def git(*args: str, check: bool = True):
@@ -106,6 +180,7 @@ def main():
             "note": "This file intentionally contains no API key and no raw cache responses.",
         },
         "requests": {},
+        "summary": {},
         "distribution": {},
         "accumulation_24h": [],
     }
@@ -144,6 +219,8 @@ def main():
     else:
         snapshot["status"] = "partial"
 
+    snapshot["summary"] = build_summary(snapshot)
+
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
@@ -155,8 +232,6 @@ def main():
         else:
             print(f"  FAIL {name}: {state.get('error')}")
 
-    # Publish even an error/partial diagnostic snapshot so remote inspection can diagnose
-    # the local worker without exposing the API key.
     if args.push:
         publish(output, args.remote, args.branch)
 
