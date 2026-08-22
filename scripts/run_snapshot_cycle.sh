@@ -8,5 +8,7 @@ cd "$REPO"
 git fetch origin main
 git merge --ff-only origin/main
 
-# A scheduled cycle must be genuinely current, so deliberately bypass request cache.
+# Scheduled cycles must be genuinely current, so deliberately bypass request cache.
+# Market-wide spot screen: 4 requests. Tracked NEAR perp: 2 requests (24h + 7d).
 PYTHONPATH=src .venv/bin/python scripts/publish_smart_money_snapshot.py --refresh --push
+PYTHONPATH=src .venv/bin/python scripts/publish_perp_signal.py NEAR --refresh --push
