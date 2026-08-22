@@ -45,10 +45,12 @@ def perp_screener(client: NansenClient, symbol: str, hours: int, *, refresh: boo
     start = end - timedelta(hours=hours)
     payload = {
         "date": {"from": utc_text(start), "to": utc_text(end)},
-        "only_smart_money": True,
         "pagination": {"page": 1, "per_page": 10},
-        "filters": {"token_symbol": symbol},
-        "order_by": [{"field": "volume", "direction": "DESC"}],
+        "filters": {
+            "token_symbol": symbol,
+            "only_smart_money": True,
+        },
+        "order_by": [{"field": "net_position_change", "direction": "DESC"}],
     }
     response = client.post_with_provenance("perp-screener", payload, refresh=refresh)
     body = response.body
