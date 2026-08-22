@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,6 +56,14 @@ def screener(
     return rows
 
 
+def safe_error(exc: Exception) -> str:
+    text = str(exc).replace("\n", " ").strip()
+    # Never publish environment-style secrets if an upstream error unexpectedly echoes them.
+    text = re.sub(r"(?i)(NANSEN_API_KEY\s*[=:]\s*)\S+", r"\1[REDACTED]", text)
+    text = re.sub(r"(?i)(apikey\s*[=:]\s*)\S+", r"\1[REDACTED]", text)
+    return f"{type(exc).__name__}: {text[:800]}"
+
+
 def git(*args: str, check: bool = True):
     return subprocess.run(["git", *args], check=check, text=True, capture_output=True)
 
@@ -84,12 +93,10 @@ def main():
     )
     args = parser.parse_args()
 
-    load_dotenv()
-    client = NansenClient()
-
+    generated_at = datetime.now(timezone.utc).isoformat()
     snapshot = {
-        "status": "live",
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "status": "diagnostic",
+        "generated_at": generated_at,
         "source": "Nansen token-screener; Smart Money only",
         "chains": DEFAULT_CHAINS,
         "method": {
@@ -98,24 +105,58 @@ def main():
             "cache_mode": "refresh" if args.refresh else "cache-first/resumable",
             "note": "This file intentionally contains no API key and no raw cache responses.",
         },
+        "requests": {},
         "distribution": {},
         "accumulation_24h": [],
     }
 
-    for timeframe in DEFAULT_TIMEFRAMES:
-        snapshot["distribution"][timeframe] = screener(
-            client, timeframe, "ASC", refresh=args.refresh
-        )
-    snapshot["accumulation_24h"] = screener(
-        client, "24h", "DESC", limit=15, refresh=args.refresh
-    )
+    load_dotenv()
+    client = None
+    try:
+        client = NansenClient()
+        snapshot["requests"]["client"] = {"ok": True}
+    except Exception as exc:
+        snapshot["requests"]["client"] = {"ok": False, "error": safe_error(exc)}
+
+    if client is not None:
+        for timeframe in DEFAULT_TIMEFRAMES:
+            key = f"distribution_{timeframe}"
+            try:
+                rows = screener(client, timeframe, "ASC", refresh=args.refresh)
+                snapshot["distribution"][timeframe] = rows
+                snapshot["requests"][key] = {"ok": True, "rows": len(rows)}
+            except Exception as exc:
+                snapshot["distribution"][timeframe] = []
+                snapshot["requests"][key] = {"ok": False, "error": safe_error(exc)}
+
+        try:
+            rows = screener(client, "24h", "DESC", limit=15, refresh=args.refresh)
+            snapshot["accumulation_24h"] = rows
+            snapshot["requests"]["accumulation_24h"] = {"ok": True, "rows": len(rows)}
+        except Exception as exc:
+            snapshot["requests"]["accumulation_24h"] = {"ok": False, "error": safe_error(exc)}
+
+    request_states = [v.get("ok") for k, v in snapshot["requests"].items() if k != "client"]
+    if client is None or not request_states or not any(request_states):
+        snapshot["status"] = "error"
+    elif all(request_states):
+        snapshot["status"] = "live"
+    else:
+        snapshot["status"] = "partial"
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n")
-    print(f"Wrote {output}")
-    print("Snapshot requests: 4 (served from cache when available unless --refresh is used)")
+    print(f"Wrote {output}; status={snapshot['status']}")
+    for name, state in snapshot["requests"].items():
+        if state.get("ok"):
+            suffix = f" rows={state['rows']}" if "rows" in state else ""
+            print(f"  OK   {name}{suffix}")
+        else:
+            print(f"  FAIL {name}: {state.get('error')}")
 
+    # Publish even an error/partial diagnostic snapshot so remote inspection can diagnose
+    # the local worker without exposing the API key.
     if args.push:
         publish(output, args.remote, args.branch)
 
