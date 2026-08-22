@@ -1,0 +1,6 @@
+{
+  "status": "awaiting-local-first-run",
+  "generated_at": null,
+  "source": "Nansen token-screener; Smart Money only",
+  "note": "Run scripts/publish_smart_money_snapshot.py locally with the authenticated .env to replace this placeholder. No API key is ever stored here."
+}
