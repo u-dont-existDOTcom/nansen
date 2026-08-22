@@ -43,4 +43,6 @@ Identical requests are cached under `data/cache/`. Use `--refresh` only when you
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The initial experiment compares early Smart-Money accumulation with momentum accumulation and eventually an eligible-token control cohort, while explicitly avoiding look-ahead and survivorship bias.
 
+For the 1–20 week exit extension, see [`docs/EXIT-TIMING.md`](docs/EXIT-TIMING.md). It treats the week number as a horizon cap and tests state-dependent Smart-Money distribution signals against fixed-horizon, fixed-profit, price-only, and flow-only exit baselines.
+
 This repository is the canonical durable checkpoint for the workflow.
